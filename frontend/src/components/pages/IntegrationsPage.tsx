@@ -20,6 +20,7 @@ const EVENT_LABELS: Record<string, string> = {
   'appointment.rescheduled': 'Appointment rescheduled',
   'appointment.cancelled': 'Appointment cancelled',
   'appointment.checked_in': 'Appointment checked in',
+  'journey.completed': 'Visit finished',
 };
 
 const statusTone = (status?: string) => (status === 'SUCCEEDED' ? 'success' : status === 'FAILED' ? 'error' : 'warning');

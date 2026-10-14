@@ -14,6 +14,7 @@ export const WEBHOOK_EVENTS = [
   'appointment.rescheduled',
   'appointment.cancelled',
   'appointment.checked_in',
+  'journey.completed',
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -28,18 +29,38 @@ export function signPayload(secret: string, timestamp: string, body: string): st
   return crypto.createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
 }
 
-export async function dispatchWebhook(organizationId: string, event: WebhookEvent, data: unknown): Promise<void> {
+/** EMR ids for an event, for one integration (Klargy Connect `refs`). */
+export type RefsResolver = (integrationId: string) => Promise<Record<string, string | null>>;
+
+/**
+ * Queues and attempts a delivery to every endpoint subscribed to the event.
+ * An endpoint owned by an integration (Klargy Connect) also gets `refs`:
+ * that integration's own ids for the records in the event. Other endpoints
+ * never see another system's ids.
+ */
+export async function dispatchWebhook(
+  organizationId: string,
+  event: WebhookEvent,
+  data: unknown,
+  refsFor?: RefsResolver
+): Promise<void> {
   const endpoints = await prisma.webhookEndpoint.findMany({
     where: { organizationId, isActive: true },
+    include: { integration: { select: { id: true } } },
   });
   const targets = endpoints.filter((e) => e.events.length === 0 || e.events.includes(event));
   if (targets.length === 0) return;
 
-  const payload = { event, createdAt: new Date().toISOString(), data };
+  const createdAt = new Date().toISOString();
   const deliveries = await Promise.all(
-    targets.map((endpoint) =>
-      prisma.webhookDelivery.create({ data: { endpointId: endpoint.id, event, payload: payload as any } })
-    )
+    targets.map(async (endpoint) => {
+      let body = data;
+      if (refsFor && endpoint.integration && data && typeof data === 'object') {
+        body = { ...(data as object), refs: await refsFor(endpoint.integration.id) };
+      }
+      const payload = { event, createdAt, data: body };
+      return prisma.webhookDelivery.create({ data: { endpointId: endpoint.id, event, payload: payload as any } });
+    })
   );
   await Promise.allSettled(deliveries.map((d) => attemptDelivery(d.id)));
 }
