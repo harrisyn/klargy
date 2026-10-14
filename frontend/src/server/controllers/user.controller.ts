@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import bcrypt from 'bcryptjs';
 import { loadCaller, listScopeOrgId, canAssignRole } from '../middleware/tenantScope.middleware';
+import { isLaunchOnlyUser, LAUNCH_ONLY_KEY } from '../lib/connectStaff';
 
 // A caller may only manage users whose current role they could assign -
 // e.g. a LOCATION_ADMIN can't edit or deactivate an ORG_ADMIN.
@@ -261,6 +262,8 @@ export const updateUserIdentity = async (req: Request, res: Response, next: Next
     // Merge with existing identity data
     const existingData = (user.identityData as Record<string, unknown>) || {};
     const mergedData = { ...existingData, ...identityData };
+    // The Connect "desk launch only" mark can't be edited away here.
+    if (isLaunchOnlyUser(existingData)) mergedData[LAUNCH_ONLY_KEY] = true;
 
     const updatedUser = await prisma.user.update({
       where: { id },

@@ -21,6 +21,8 @@ const EVENT_LABELS: Record<string, string> = {
   'appointment.cancelled': 'Appointment cancelled',
   'appointment.checked_in': 'Appointment checked in',
   'journey.completed': 'Visit finished',
+  'servicepoint.opened': 'Signed in to a room or desk',
+  'servicepoint.closed': 'Left a room or desk',
 };
 
 const statusTone = (status?: string) => (status === 'SUCCEEDED' ? 'success' : status === 'FAILED' ? 'error' : 'warning');

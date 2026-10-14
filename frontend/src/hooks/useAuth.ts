@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/api/client';
 import type { User, AuthResponse } from '@/types';
 
@@ -8,6 +8,9 @@ export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by every sign-in, so a slower check of an older token can't
+  // replace the person who just signed in.
+  const generation = useRef(0);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -23,14 +26,15 @@ export const useAuth = () => {
   }, []);
 
   const fetchUser = async () => {
+    const started = generation.current;
     try {
       const userData = await api.getMe();
-      setUser(userData);
+      if (started === generation.current) setUser(userData);
     } catch (err: unknown) {
       // Only an explicit 401 means the session is gone. A 500 or network
       // error (e.g. a brief database outage) must not sign everyone out.
       const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 401 && typeof window !== 'undefined') {
+      if (status === 401 && started === generation.current && typeof window !== 'undefined') {
         localStorage.removeItem('token');
       }
     } finally {
@@ -42,6 +46,7 @@ export const useAuth = () => {
     setError(null);
     try {
       const response: AuthResponse = await api.login(email, password, options);
+      generation.current += 1;
       if (typeof window !== 'undefined') {
         localStorage.setItem('token', response.token);
       }
@@ -53,6 +58,20 @@ export const useAuth = () => {
       setError(message);
       throw new Error(message);
     }
+  }, []);
+
+  /** Signs in with a Klargy Connect desk launch code (the desk opened inside
+   * an EMR) and returns where the desk may talk to. */
+  const signInWithLaunch = useCallback(async (code: string) => {
+    setError(null);
+    generation.current += 1;
+    const response = await api.exchangeDeskLaunch(code);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('token', response.token);
+    }
+    setUser(response.user);
+    setLoading(false);
+    return { launchId: response.launchId, origin: response.origin, servicePointId: response.servicePointId };
   }, []);
 
   const register = useCallback(async (userData: { email: string; password: string; firstName: string; lastName: string }) => {
@@ -69,6 +88,7 @@ export const useAuth = () => {
   }, []);
 
   const logout = useCallback(() => {
+    generation.current += 1;
     if (typeof window !== 'undefined') {
       localStorage.removeItem('token');
     }
@@ -85,6 +105,7 @@ export const useAuth = () => {
     loading,
     error,
     login,
+    signInWithLaunch,
     register,
     logout,
     isAuthenticated,

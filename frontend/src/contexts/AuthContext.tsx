@@ -9,6 +9,7 @@ interface AuthContextType {
   loading: boolean;
   error: string | null;
   login: (email: string, password: string, options?: { slug?: string; adminLogin?: boolean }) => Promise<User>;
+  signInWithLaunch: (code: string) => Promise<{ launchId: string; origin: string; servicePointId: string | null }>;
   register: (userData: { email: string; password: string; firstName: string; lastName: string }) => Promise<User>;
   logout: () => void;
   isAuthenticated: boolean;

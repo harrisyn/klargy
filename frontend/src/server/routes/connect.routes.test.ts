@@ -29,6 +29,20 @@ describe('Connect routes', () => {
     expect(scopeOf('post', '/entries/by-ref/:type/:id/:action')).toBe('entries:write');
   });
 
+  it('guards the desk launch with desk:launch', () => {
+    expect(scopeOf('post', '/desk/launch')).toBe('desk:launch');
+    expect(CONNECT_SCOPES).toContain('desk:launch');
+  });
+
+  it('refuses a key without desk:launch', () => {
+    const res: any = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+    const phase2 = { integration: { id: 'int1', organizationId: 'org1', scopes: ['entries:write'] } };
+    requireScope('desk:launch')(phase2 as any, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('gives new keys the phase 2 scopes', () => {
     expect(CONNECT_SCOPES).toEqual(expect.arrayContaining(['patients:write', 'entries:read', 'entries:write']));
   });

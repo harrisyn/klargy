@@ -15,6 +15,7 @@ export const CONNECT_SCOPES = [
   'patients:write',
   'entries:read',
   'entries:write',
+  'desk:launch',
 ] as const;
 export type ConnectScope = (typeof CONNECT_SCOPES)[number];
 

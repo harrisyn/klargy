@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractSubdomain, extractCustomDomainCandidate, buildAdminUrl } from '@/lib/subdomain';
 import prisma from '@/server/lib/prisma';
+import { deskFrameAncestors, isDeskPath } from '@/lib/deskEmbed';
 
 // Next 16 "proxy" (formerly middleware). Always runs on the Node.js
 // runtime, so it can read the tenant straight from the database.
@@ -37,6 +38,37 @@ const slugForCustomDomain = (domain: string) =>
     return found?.organization.slug ?? null;
   });
 
+const originCache = new Map<string, { origins: string[]; expires: number }>();
+
+/** embedOrigins of the organisation's active integrations (Klargy Connect). */
+async function embedOriginsFor(slug: string): Promise<string[]> {
+  const hit = originCache.get(slug);
+  if (hit && hit.expires > Date.now()) return hit.origins;
+  const integrations = await prisma.integration.findMany({
+    where: { status: 'ACTIVE', organization: { slug } },
+    select: { embedOrigins: true },
+  });
+  const origins = integrations.flatMap((i) => i.embedOrigins);
+  originCache.set(slug, { origins, expires: Date.now() + CACHE_MS });
+  if (originCache.size > 5000) originCache.clear();
+  return origins;
+}
+
+/** The tenant's response; the desk gets frame-ancestors when the
+ * organisation has EMR connections (see lib/deskEmbed). */
+async function tenantResponse(pathname: string, slug: string, customDomain?: string) {
+  const response = NextResponse.next();
+  response.headers.set('x-tenant-slug', slug);
+  if (customDomain) response.headers.set('x-tenant-custom-domain', customDomain);
+  if (isDeskPath(pathname)) {
+    // On a lookup error, refuse framing by others rather than allow it.
+    const origins = await embedOriginsFor(slug).catch(() => null);
+    const policy = origins ? deskFrameAncestors(origins) : "frame-ancestors 'self'";
+    if (policy) response.headers.set('Content-Security-Policy', policy);
+  }
+  return response;
+}
+
 function notFound(req: NextRequest) {
   const url = req.nextUrl.clone();
   url.pathname = '/workspace-not-found';
@@ -55,12 +87,7 @@ export async function proxy(req: NextRequest) {
     const candidate = extractCustomDomainCandidate(host);
     if (candidate) {
       const slug = await slugForCustomDomain(candidate).catch(() => null);
-      if (slug) {
-        const response = NextResponse.next();
-        response.headers.set('x-tenant-slug', slug);
-        response.headers.set('x-tenant-custom-domain', candidate);
-        return response;
-      }
+      if (slug) return tenantResponse(pathname, slug, candidate);
     }
 
     if (pathname.startsWith('/superadmin')) {
@@ -84,7 +111,5 @@ export async function proxy(req: NextRequest) {
   const slug = await slugExists(subdomain).catch(() => null);
   if (!slug) return notFound(req);
 
-  const response = NextResponse.next();
-  response.headers.set('x-tenant-slug', subdomain);
-  return response;
+  return tenantResponse(pathname, subdomain);
 }

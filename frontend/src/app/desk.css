@@ -116,6 +116,7 @@ kbd {
 .desk-option small { color: var(--primary-700); font-size: 0.8125rem; font-weight: 600; }
 .desk-option[data-taken="true"] { background: var(--gray-50); }
 .desk-option[data-taken="true"] small { color: var(--gray-500); font-weight: 500; }
+.desk-option[data-suggested="true"] { border-color: var(--primary-500); box-shadow: 0 0 0 3px var(--primary-100); }
 
 @media (max-width: 1000px) { .desk-layout { grid-template-columns: 1fr; } }
 

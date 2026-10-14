@@ -52,6 +52,7 @@ interface OperatorData {
 
 export interface DeskInstance {
   id: string;
+  servicePointId?: string;
   instanceNumber: number;
   displayName: string | null;
   servicePointName: string;
@@ -88,8 +89,22 @@ function errorText(err: unknown, fallback: string) {
   return e?.response?.data?.error || e?.response?.data?.message || fallback;
 }
 
-export function useDesk() {
+/** What the practitioner just did to an entry, for a host app (Klargy
+ * Connect): `called` when they called someone, `updated` when an entry was
+ * served, sent on, cancelled or marked as not here. */
+export type DeskEntryEvent = 'called' | 'updated';
+
+export interface UseDeskOptions {
+  onEntryEvent?: (kind: DeskEntryEvent, entryId: string) => void;
+}
+
+export function useDesk(options: UseDeskOptions = {}) {
   const { user } = useAuthContext();
+  const onEntryEvent = useRef(options.onEntryEvent);
+  useEffect(() => { onEntryEvent.current = options.onEntryEvent; });
+  const report = useCallback((kind: DeskEntryEvent, entryId?: string | null) => {
+    if (entryId) onEntryEvent.current?.(kind, entryId);
+  }, []);
   const terms = useTerms();
   const { joinQueue, leaveQueue, onQueueUpdated, onEntryStatusChanged } = useSocket();
 
@@ -248,8 +263,9 @@ export function useDesk() {
   const callNext = useCallback((entryId?: string) => run('call', async () => {
     if (!queueId || !desk) return;
     setAfterComplete(null);
-    await api.callNextWithServicePoint(queueId, desk.instanceId, entryId);
-  }), [run, queueId, desk]);
+    const called = await api.callNextWithServicePoint(queueId, desk.instanceId, entryId);
+    report('called', called?.id);
+  }), [run, queueId, desk, report]);
 
   const recall = useCallback(() => run('recall', async () => {
     if (!queueId || !current) return;
@@ -261,32 +277,37 @@ export function useDesk() {
     if (!queueId || !current) return;
     const entry = current;
     const result = await api.completeEntryWithSuggestions(queueId, entry.id);
+    report('updated', entry.id);
     if (result.autoTransferred) {
+      report('updated', result.nextTicket?.entryId);
       setNotice(`${personName(entry) || entry.ticketNumber} was sent on to ${result.nextTicket?.serviceName} as ${result.nextTicket?.ticketNumber}.`);
     } else if (result.nextServices?.length) {
       setAfterComplete({ entry, nextServices: result.nextServices });
     }
-  }), [run, queueId, current]);
+  }), [run, queueId, current, report]);
 
   const sendTo = useCallback((service: NextService) => run('send', async () => {
     if (!queueId || !afterComplete) return;
     const result = await api.transferEntry(queueId, afterComplete.entry.id, service.serviceId);
+    report('updated', result.entry?.id);
     setNotice(`${personName(afterComplete.entry) || afterComplete.entry.ticketNumber} is now ${result.ticketNumber} at ${result.serviceName || service.displayName}.`);
     setAfterComplete(null);
-  }), [run, queueId, afterComplete]);
+  }), [run, queueId, afterComplete, report]);
 
   const noShow = useCallback(() => run('noshow', async () => {
     if (!queueId || !current) return;
     await api.markNoShow(queueId, current.id);
+    report('updated', current.id);
     setNotice(`${current.ticketNumber} marked as not here.`);
-  }), [run, queueId, current]);
+  }), [run, queueId, current, report]);
 
   // Someone served at another desk (or no desk) who was never finished.
   const finishOther = useCallback((entry: DeskEntry) => run('finish', async () => {
     if (!queueId) return;
     await api.completeEntryWithSuggestions(queueId, entry.id);
+    report('updated', entry.id);
     setNotice(`${entry.ticketNumber} marked as done.`);
-  }), [run, queueId]);
+  }), [run, queueId, report]);
 
   const reorder = useCallback((ids: string[]) => run('reorder', async () => {
     if (!queueId) return;
