@@ -317,6 +317,7 @@ model QueueEntry {
   @@index([sessionId])
   @@index([journeyId])
   @@index([servicePointInstanceId])
+  @@index([updatedAt])
 }
 
 model ServiceFlow {
@@ -872,8 +873,25 @@ model Integration {
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   externalReferences ExternalReference[]
+  idempotencyKeys    ConnectIdempotencyKey[]
 
   @@index([organizationId])
+}
+
+// Idempotency-Key replay for Klargy Connect writes (24 hours). statusCode 0
+// means the first request with the key is still running.
+model ConnectIdempotencyKey {
+  id            String      @id @default(uuid())
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  key           String
+  requestHash   String
+  statusCode    Int         @default(0)
+  response      Json?
+  createdAt     DateTime    @default(now())
+
+  @@unique([integrationId, key])
+  @@index([createdAt])
 }
 
 // Links one Klargy record to the record it mirrors in an integrated system,

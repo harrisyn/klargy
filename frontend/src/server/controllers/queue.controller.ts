@@ -6,7 +6,6 @@ import { emitToQueue, emitToService, emitToLocation, emitToQueueAndLocation, SOC
 import { generateTicketNumber, getNextSequence, generateQRData } from '../utils/ticket';
 import { getStartOfDay, startOfLocalDate, validTimeZone } from '../utils/date';
 import { v4 as uuidv4 } from 'uuid';
-import { checkLimit } from '../middleware/subscription.middleware';
 import { WAITING_ORDER, computePosition, notifyEntry } from '../services/notifications.service';
 import {
   recordQueueEvent,
@@ -18,7 +17,9 @@ import {
   TransferError,
   getOrCreateQueueForDate,
   serviceTimeZone,
+  ORIGIN,
 } from '../services/queueEvents.service';
+import { joinQueueEntry, callEntry, serveEntry, endEntry, QueueActionError } from '../services/queueActions.service';
 
 const actorId = (req: Request) => req.user?.userId ?? null;
 const minutesSince = (from: Date | null | undefined) =>
@@ -122,111 +123,15 @@ export const getServiceQueues = async (req: Request, res: Response, next: NextFu
 // Join queue - add user to queue
 export const joinQueue = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
     const { userId, priority, notes } = req.body;
-
-    const queue = await prisma.queue.findUnique({
-      where: { id },
-      include: { 
-        service: {
-          include: { location: true }
-        } 
-      },
-    });
-
-    if (!queue) {
-      return res.status(404).json({ error: 'Queue not found' });
-    }
-
-    if (queue.status !== 'ACTIVE') {
-      return res.status(400).json({ error: 'Queue is not active' });
-    }
-
-    const organizationId = queue.service.location.organizationId;
-    const [dailyCheck, periodCheck] = await Promise.all([
-      checkLimit(organizationId, 'queueEntriesDaily'),
-      checkLimit(organizationId, 'queueEntriesPeriod'),
-    ]);
-
-    if (!dailyCheck.allowed) {
-      return res.status(403).json({
-        error: 'Limit reached',
-        message: `This location has reached its daily queue entry limit (${dailyCheck.limit}). Please try again tomorrow.`,
-        limitType: 'queueEntriesDaily',
-        current: dailyCheck.current,
-        limit: dailyCheck.limit,
-      });
-    }
-
-    if (!periodCheck.allowed) {
-      return res.status(403).json({
-        error: 'Limit reached',
-        message: `This organization has reached its queue entry limit for the current billing period (${periodCheck.limit}).`,
-        limitType: 'queueEntriesPeriod',
-        current: periodCheck.current,
-        limit: periodCheck.limit,
-      });
-    }
-
-    // Check if user is already in this queue
-    const existingEntry = await prisma.queueEntry.findFirst({
-      where: {
-        queueId: id,
-        userId,
-        status: { in: ['WAITING', 'SERVING'] },
-      },
-    });
-
-    if (existingEntry) {
-      return res.status(400).json({ error: 'User already in queue', entry: existingEntry });
-    }
-
-    // Generate ticket number
-    const sequence = await getNextSequence(prisma, id);
-    const servicePrefix = queue.service.name.charAt(0).toUpperCase();
-    const ticketNumber = generateTicketNumber(servicePrefix, sequence);
-
-    // Create queue entry
-    const entry = await prisma.queueEntry.create({
-      data: {
-        queueId: id,
-        userId,
-        ticketNumber,
-        priority: priority || 0,
-        notes,
-      },
-      include: {
-        user: {
-          select: { id: true, firstName: true, lastName: true, phone: true },
-        },
-        queue: {
-          include: { service: true },
-        },
-      },
-    });
-
-    // Position in the same order staff call people (0-based here, +1 below)
-    const position = Math.max(0, (await computePosition(id, entry.id)) - 1);
-
-    // Emit real-time update to both queue and location rooms
-    const updateData = {
-      queueId: id,
-      action: 'joined',
-      entry: { ...entry, position: position + 1 },
-    };
-    emitToQueue(id, SOCKET_EVENTS.QUEUE_UPDATED, updateData);
-    emitToLocation(queue.service.location.id, SOCKET_EVENTS.QUEUE_UPDATED, updateData);
-
-    await startJourney(entry.id);
-    await recordQueueEvent({ action: 'entry.joined', actorUserId: actorId(req), queueId: id, entryId: entry.id });
-    await afterQueueChange(id);
-
+    const { entry, position } = await joinQueueEntry(req.params.id, { userId, priority, notes }, { actorUserId: actorId(req) });
     res.status(201).json({
       ...entry,
-      position: position + 1,
+      position,
       qrData: generateQRData(entry),
     });
   } catch (error) {
+    if (error instanceof QueueActionError) return res.status(error.status).json(error.body);
     next(error);
   }
 };
@@ -288,65 +193,7 @@ export const callNext = async (req: Request, res: Response, next: NextFunction) 
 export const markServed = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id, entryId } = req.params;
-
-    // Get the entry first to calculate service duration
-    const existingEntry = await prisma.queueEntry.findUnique({
-      where: { id: entryId },
-      select: { calledAt: true, servedAt: true }
-    });
-
-    // Calculate service duration in minutes
-    let serviceDuration: number | undefined;
-    if (existingEntry?.calledAt) {
-      const durationMs = new Date().getTime() - new Date(existingEntry.calledAt).getTime();
-      serviceDuration = Math.round(durationMs / 60000); // Convert to minutes
-    }
-
-    const entry = await prisma.queueEntry.update({
-      where: { id: entryId },
-      data: {
-        status: 'SERVED',
-        servedAt: new Date(),
-        completedAt: new Date(),
-        serviceDuration,
-      },
-      include: {
-        user: {
-          select: { id: true, firstName: true, lastName: true },
-        },
-        queue: {
-          include: { service: true },
-        },
-      },
-    });
-
-    // Emit real-time update to both queue and location rooms
-    const locationId = await getLocationIdFromQueue(id);
-    emitToQueueAndLocation(id, locationId, SOCKET_EVENTS.ENTRY_STATUS_CHANGED, {
-      queueId: id,
-      entryId: entry.id,
-      status: 'SERVED',
-      entry,
-    });
-
-    await recordQueueEvent({ action: 'entry.served', actorUserId: actorId(req), queueId: id, entryId: entry.id });
-
-    // Auto-transfer to the next service if a flow says so
-    const serviceFlow = await prisma.serviceFlow.findFirst({
-      where: { fromServiceId: entry.queue.serviceId, autoTransfer: true },
-      orderBy: { priority: 'asc' },
-    });
-    if (serviceFlow) {
-      try {
-        await transferEntryToService(entry.id, serviceFlow.toServiceId, { actorUserId: actorId(req) });
-      } catch (err) {
-        if (!(err instanceof TransferError)) throw err;
-        // Target queue closed/inactive: the patient is still served here.
-      }
-    }
-    await closeJourneyIfDone(entry.id);
-    await afterQueueChange(id);
-
+    const { entry } = await serveEntry(id, entryId, { actorUserId: actorId(req) });
     res.json(entry);
   } catch (error) {
     next(error);
@@ -357,37 +204,7 @@ export const markServed = async (req: Request, res: Response, next: NextFunction
 export const cancelEntry = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id, entryId } = req.params;
-
-    // Get queue to find locationId
-    const queue = await prisma.queue.findUnique({
-      where: { id },
-      select: { service: { select: { locationId: true } } }
-    });
-
-    const entry = await prisma.queueEntry.update({
-      where: { id: entryId },
-      data: {
-        status: 'CANCELLED',
-        completedAt: new Date(),
-      },
-    });
-
-    // Emit to both queue and location rooms
-    const updateData = {
-      queueId: id,
-      entryId: entry.id,
-      status: 'CANCELLED',
-    };
-    emitToQueue(id, SOCKET_EVENTS.ENTRY_STATUS_CHANGED, updateData);
-    if (queue?.service?.locationId) {
-      emitToLocation(queue.service.locationId, SOCKET_EVENTS.ENTRY_STATUS_CHANGED, updateData);
-    }
-
-    await recordQueueEvent({ action: 'entry.cancelled', actorUserId: actorId(req), queueId: id, entryId: entry.id });
-    await closeJourneyIfDone(entry.id);
-    await afterQueueChange(id);
-
-    res.json(entry);
+    res.json(await endEntry(id, entryId, 'CANCELLED', { actorUserId: actorId(req) }));
   } catch (error) {
     next(error);
   }
@@ -397,37 +214,7 @@ export const cancelEntry = async (req: Request, res: Response, next: NextFunctio
 export const markNoShow = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id, entryId } = req.params;
-
-    // Get queue to find locationId
-    const queue = await prisma.queue.findUnique({
-      where: { id },
-      select: { service: { select: { locationId: true } } }
-    });
-
-    const entry = await prisma.queueEntry.update({
-      where: { id: entryId },
-      data: {
-        status: 'NO_SHOW',
-        completedAt: new Date(),
-      },
-    });
-
-    // Emit to both queue and location rooms
-    const updateData = {
-      queueId: id,
-      entryId: entry.id,
-      status: 'NO_SHOW',
-    };
-    emitToQueue(id, SOCKET_EVENTS.ENTRY_STATUS_CHANGED, updateData);
-    if (queue?.service?.locationId) {
-      emitToLocation(queue.service.locationId, SOCKET_EVENTS.ENTRY_STATUS_CHANGED, updateData);
-    }
-
-    await recordQueueEvent({ action: 'entry.no_show', actorUserId: actorId(req), queueId: id, entryId: entry.id });
-    await closeJourneyIfDone(entry.id);
-    await afterQueueChange(id);
-
-    res.json(entry);
+    res.json(await endEntry(id, entryId, 'NO_SHOW', { actorUserId: actorId(req) }));
   } catch (error) {
     next(error);
   }
@@ -635,7 +422,7 @@ export const publicJoinQueue = async (req: Request, res: Response, next: NextFun
     emitToLocation(service.location.id, SOCKET_EVENTS.QUEUE_UPDATED, updateData);
 
     await startJourney(entry.id);
-    await recordQueueEvent({ action: 'entry.joined', queueId: queue.id, entryId: entry.id, data: { source: 'public' } });
+    await recordQueueEvent({ action: 'entry.joined', origin: ORIGIN.public, queueId: queue.id, entryId: entry.id, data: { source: 'public' } });
     await notifyEntry(entry.id, 'QUEUE_JOINED').catch((e) => console.error('join notification failed:', e));
     await afterQueueChange(queue.id);
 
@@ -847,112 +634,14 @@ export const reorderEntries = async (req: Request, res: Response, next: NextFunc
 // Call next with service point assignment
 export const callNextWithServicePoint = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const { servicePointInstanceId } = req.body;
-
-    const queue = await prisma.queue.findUnique({
-      where: { id },
-      select: { serviceId: true }
-    });
-
-    if (!queue) {
-      return res.status(404).json({ error: 'Queue not found' });
-    }
-
-    if (servicePointInstanceId) {
-      const instance = await prisma.servicePointInstance.findUnique({
-        where: { id: servicePointInstanceId },
-        include: { servicePointService: { include: { servicePoint: true } } },
-      });
-
-      if (!instance || !instance.isActive) {
-        return res.status(400).json({ error: 'Invalid or inactive service point instance' });
-      }
-
-      if (!instance.servicePointService.servicePoint.isActive || !instance.servicePointService.isActive) {
-        return res.status(400).json({ error: 'Invalid or inactive service point' });
-      }
-
-      if (instance.servicePointService.serviceId !== queue.serviceId) {
-        return res.status(400).json({ error: 'Service point instance is not authorized for this service' });
-      }
-    }
-
-    // Claim atomically: two desks pressing "Call next" together must not get
-    // the same person. The conditional update only succeeds for one of them;
-    // the other moves on to the next in line.
-    const requestedEntryId = req.body?.entryId ? String(req.body.entryId) : null;
-    let claimedId: string | null = null;
-    for (let attempt = 0; attempt < 5 && !claimedId; attempt++) {
-      const candidate = await prisma.queueEntry.findFirst({
-        where: { queueId: id, status: 'WAITING', ...(requestedEntryId ? { id: requestedEntryId } : {}) },
-        orderBy: WAITING_ORDER,
-        select: { id: true, joinedAt: true },
-      });
-      if (!candidate) break;
-      const claimed = await prisma.queueEntry.updateMany({
-        where: { id: candidate.id, status: 'WAITING' },
-        data: {
-          status: 'SERVING',
-          calledAt: new Date(),
-          waitDuration: minutesSince(candidate.joinedAt),
-          servicePointInstanceId: servicePointInstanceId || null,
-        },
-      });
-      if (claimed.count === 1) claimedId = candidate.id;
-      else if (requestedEntryId) break;
-    }
-
-    if (!claimedId) {
-      return res.status(404).json({
-        error: requestedEntryId ? 'They’ve already been called, or have left the queue.' : 'Nobody is waiting.',
-      });
-    }
-
-    const entry = await prisma.queueEntry.findUniqueOrThrow({
-      where: { id: claimedId },
-      include: {
-        user: {
-          select: { id: true, firstName: true, lastName: true, phone: true },
-        },
-        servicePointInstance: {
-          include: { servicePointService: { include: { servicePoint: true } } },
-        },
-      },
-    });
-
-    const servicePointForPayload = entry.servicePointInstance?.servicePointService?.servicePoint ?? null;
-
-    const locationId = await getLocationIdFromQueue(id);
-    emitToQueueAndLocation(id, locationId, SOCKET_EVENTS.ENTRY_STATUS_CHANGED, {
-      queueId: id,
-      entryId: entry.id,
-      status: 'SERVING',
-      entry: { ...entry, servicePoint: servicePointForPayload },
-      servicePoint: servicePointForPayload,
-      servicePointInstance: entry.servicePointInstance,
-    });
-
-    await recordQueueEvent({
-      action: 'entry.called',
-      actorUserId: actorId(req),
-      queueId: id,
-      entryId: entry.id,
-      data: { servicePointId: servicePointForPayload?.id ?? null, servicePointInstanceId: servicePointInstanceId || null },
-    });
-    await afterEntryCalled(
-      entry.id,
-      entry.servicePointInstance?.displayName ||
-        (servicePointForPayload
-          ? [servicePointForPayload.displayName || servicePointForPayload.name, entry.servicePointInstance?.instanceNumber]
-              .filter(Boolean)
-              .join(' ')
-          : null)
+    const { entry, servicePoint } = await callEntry(
+      req.params.id,
+      { servicePointInstanceId: req.body?.servicePointInstanceId, entryId: req.body?.entryId },
+      { actorUserId: actorId(req) }
     );
-    await afterQueueChange(id);
-
-    res.json({ ...entry, servicePoint: servicePointForPayload });
+    res.json({ ...entry, servicePoint });
   } catch (error) {
+    if (error instanceof QueueActionError) return res.status(error.status).json(error.body);
     next(error);
   }
 };
@@ -1146,7 +835,7 @@ export const publicJoinQueueWithSession = async (req: Request, res: Response, ne
     emitToLocation(service.location.id, SOCKET_EVENTS.QUEUE_UPDATED, updateData);
 
     await startJourney(entry.id);
-    await recordQueueEvent({ action: 'entry.joined', queueId: queue.id, entryId: entry.id, data: { source: 'public' } });
+    await recordQueueEvent({ action: 'entry.joined', origin: ORIGIN.public, queueId: queue.id, entryId: entry.id, data: { source: 'public' } });
     await notifyEntry(entry.id, 'QUEUE_JOINED').catch((e) => console.error('join notification failed:', e));
     await afterQueueChange(queue.id);
 
@@ -1304,7 +993,10 @@ export const completeWithNextSuggestions = async (req: Request, res: Response, n
     const autoTransferFlow = entry.queue.service.flowsFrom.find(f => f.autoTransfer);
     if (autoTransferFlow) {
       try {
-        const result = await transferEntryToService(entry.id, autoTransferFlow.toServiceId, { actorUserId: actorId(req) });
+        const result = await transferEntryToService(entry.id, autoTransferFlow.toServiceId, {
+          actorUserId: actorId(req),
+          origin: ORIGIN.system,
+        });
         return res.json({
           entry,
           autoTransferred: true,
@@ -1320,7 +1012,7 @@ export const completeWithNextSuggestions = async (req: Request, res: Response, n
         // Target not accepting patients - fall through to manual suggestions.
       }
     }
-    await closeJourneyIfDone(entry.id);
+    await closeJourneyIfDone(entry.id, { actorUserId: actorId(req) });
 
     // Build next service suggestions
     const nextServices = entry.queue.service.flowsFrom.map(flow => ({

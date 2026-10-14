@@ -8,7 +8,14 @@ import { getOrganizationFeatures } from './subscription.middleware';
  * calling us with an integration API key instead of a staff user's JWT.
  */
 
-export const CONNECT_SCOPES = ['integration:write', 'catalog:read', 'catalog:write'] as const;
+export const CONNECT_SCOPES = [
+  'integration:write',
+  'catalog:read',
+  'catalog:write',
+  'patients:write',
+  'entries:read',
+  'entries:write',
+] as const;
 export type ConnectScope = (typeof CONNECT_SCOPES)[number];
 
 export interface IntegrationCaller {

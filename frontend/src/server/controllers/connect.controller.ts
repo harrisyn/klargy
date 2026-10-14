@@ -4,27 +4,31 @@ import prisma from '../lib/prisma';
 import { encrypt, decrypt } from '../lib/encryption';
 import { assertPublicUrl } from '../lib/urlSafety';
 import { WEBHOOK_EVENTS } from '../services/webhooks.service';
+import { ADMIN_MAPPABLE_TYPES, CONNECT_REF_TYPES } from '../services/externalRefs.service';
 
 // Klargy Connect v1 (docs/connect/v1.md): the API another system (an EMR)
 // calls with its integration API key. Every handler here runs after
 // authenticateIntegration, so req.integration is set.
 
 export const CONTRACT = 'klargy-connect/v1';
-export const MAPPABLE_TYPES = ['location', 'service', 'service_point', 'staff'] as const;
+/** What an admin may map. Connect calls create the other reference types
+ * (patient, visit, encounter) themselves. */
+export const MAPPABLE_TYPES = ADMIN_MAPPABLE_TYPES;
 
 const MAX_CATALOG_ITEMS = 5000;
 const MAX_TEXT = 200;
 const MAX_EMBED_ORIGINS = 10;
 
-class ConnectError extends Error {
-  constructor(message: string, public status = 400) {
+/** A refusal sent as `{error, code?, ...extra}`. */
+export class ConnectError extends Error {
+  constructor(message: string, public status = 400, public code?: string, public extra: Record<string, unknown> = {}) {
     super(message);
   }
 }
 
-const badRequest = (message: string) => new ConnectError(message);
+export const badRequest = (message: string) => new ConnectError(message);
 
-function text(value: unknown, field: string, required = true): string | undefined {
+export function text(value: unknown, field: string, required = true): string | undefined {
   if (value === undefined || value === null || value === '') {
     if (required) throw badRequest(`${field} is required`);
     return undefined;
@@ -111,8 +115,10 @@ async function embedOriginList(value: unknown): Promise<string[]> {
   });
 }
 
-function handle(error: unknown, res: Response, next: NextFunction) {
-  if (error instanceof ConnectError) return res.status(error.status).json({ error: error.message });
+export function handle(error: unknown, res: Response, next: NextFunction) {
+  if (error instanceof ConnectError) {
+    return res.status(error.status).json({ error: error.message, ...(error.code ? { code: error.code } : {}), ...error.extra });
+  }
   const status = (error as { status?: number }).status;
   if (status && status < 500) return res.status(status).json({ error: (error as Error).message });
   next(error);
@@ -262,8 +268,14 @@ export const getCatalog = async (req: Request, res: Response, next: NextFunction
 
 export const getMappings = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // The admin's mappings by default; references Connect calls created
+    // (patients, visits, encounters) only when asked for by type.
+    const type = text(req.query.resourceType, 'resourceType', false);
+    if (type && ![...ADMIN_MAPPABLE_TYPES, ...CONNECT_REF_TYPES].includes(type as never)) {
+      throw badRequest(`resourceType must be one of: ${[...ADMIN_MAPPABLE_TYPES, ...CONNECT_REF_TYPES].join(', ')}`);
+    }
     const refs = await prisma.externalReference.findMany({
-      where: { integrationId: req.integration!.id },
+      where: { integrationId: req.integration!.id, resourceType: type ?? { in: [...ADMIN_MAPPABLE_TYPES] } },
       select: { resourceType: true, resourceId: true, externalId: true },
       orderBy: { createdAt: 'asc' },
     });

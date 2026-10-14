@@ -4,6 +4,7 @@ import { generateTicketNumber, getNextSequence } from '../utils/ticket';
 import { getStartOfDay, generateTimeSlots, validTimeZone } from '../utils/date';
 import { dispatchWebhook, WebhookEvent } from './webhooks.service';
 import { notifyEntry, notifyPositions } from './notifications.service';
+import { buildRefs, RefSubject } from './externalRefs.service';
 
 /**
  * One place every queue state change goes through after it's written:
@@ -24,12 +25,26 @@ export type QueueAction =
   | 'appointment.created'
   | 'appointment.rescheduled'
   | 'appointment.cancelled'
-  | 'appointment.checked_in';
+  | 'appointment.checked_in'
+  | 'journey.completed';
 
 const WEBHOOK_ACTIONS = new Set<string>([
   'entry.joined', 'entry.called', 'entry.served', 'entry.cancelled', 'entry.no_show', 'entry.transferred',
   'appointment.created', 'appointment.rescheduled', 'appointment.cancelled', 'appointment.checked_in',
+  'journey.completed',
 ]);
+
+/** Who caused an event (docs/connect/v1.md section 4). */
+export type EventOrigin =
+  | { type: 'staff' | 'public' | 'system'; integrationId?: null }
+  | { type: 'integration'; integrationId: string };
+
+export const ORIGIN = {
+  staff: { type: 'staff' } as EventOrigin,
+  public: { type: 'public' } as EventOrigin,
+  system: { type: 'system' } as EventOrigin,
+  integration: (integrationId: string): EventOrigin => ({ type: 'integration', integrationId }),
+};
 
 interface QueueEventInput {
   action: QueueAction;
@@ -38,51 +53,93 @@ interface QueueEventInput {
   entryId?: string | null;
   organizationId?: string | null;
   data?: Record<string, unknown>;
+  /** Defaults to staff when there's an actor, else system. */
+  origin?: EventOrigin;
+  /** Replaces the entry snapshot as the webhook data (non-entry events). */
+  payload?: Record<string, unknown>;
+  /** Replaces the Klargy ids translated into `refs`. */
+  refSubject?: RefSubject;
 }
 
-async function entrySnapshot(entryId: string) {
-  const entry = await prisma.queueEntry.findUnique({
-    where: { id: entryId },
-    include: {
-      user: { select: { id: true, firstName: true, lastName: true, phone: true, identityData: true } },
-      queue: { select: { id: true, service: { select: { id: true, name: true, location: { select: { id: true, name: true, organizationId: true } } } } } },
-    },
-  });
-  if (!entry) return null;
+/** What an entry's webhook data and Connect responses are built from. */
+export const ENTRY_SNAPSHOT_INCLUDE = {
+  user: { select: { id: true, firstName: true, lastName: true, phone: true, identityData: true } },
+  queue: { select: { id: true, service: { select: { id: true, name: true, location: { select: { id: true, name: true, organizationId: true } } } } } },
+  servicePointInstance: { select: { servicePointService: { select: { servicePoint: { select: { id: true, name: true } } } } } },
+} as const;
+
+type SnapshotEntry = {
+  id: string;
+  ticketNumber: string;
+  status: string;
+  queueId: string;
+  journeyId: string | null;
+  previousEntryId: string | null;
+  joinedAt: Date;
+  calledAt: Date | null;
+  servedAt: Date | null;
+  completedAt: Date | null;
+  user: { id: string; firstName: string; lastName: string; phone: string | null; identityData: unknown };
+  queue: { service: { id: string; name: string; location: { id: string; name: string; organizationId: string } } };
+  servicePointInstance: { servicePointService: { servicePoint: { id: string; name: string } } } | null;
+};
+
+export function toEntrySnapshot(entry: SnapshotEntry) {
+  const servicePoint = entry.servicePointInstance?.servicePointService.servicePoint ?? null;
   return {
-    organizationId: entry.queue.service.location.organizationId,
-    snapshot: {
-      entryId: entry.id,
-      ticketNumber: entry.ticketNumber,
-      status: entry.status,
-      queueId: entry.queueId,
-      service: { id: entry.queue.service.id, name: entry.queue.service.name },
-      location: { id: entry.queue.service.location.id, name: entry.queue.service.location.name },
-      journeyId: entry.journeyId,
-      previousEntryId: entry.previousEntryId,
-      joinedAt: entry.joinedAt,
-      calledAt: entry.calledAt,
-      servedAt: entry.servedAt,
-      completedAt: entry.completedAt,
-      patient: entry.user,
-    },
+    entryId: entry.id,
+    ticketNumber: entry.ticketNumber,
+    status: entry.status,
+    queueId: entry.queueId,
+    service: { id: entry.queue.service.id, name: entry.queue.service.name },
+    location: { id: entry.queue.service.location.id, name: entry.queue.service.location.name },
+    servicePoint: servicePoint ? { id: servicePoint.id, name: servicePoint.name } : null,
+    journeyId: entry.journeyId,
+    previousEntryId: entry.previousEntryId,
+    joinedAt: entry.joinedAt,
+    calledAt: entry.calledAt,
+    servedAt: entry.servedAt,
+    completedAt: entry.completedAt,
+    patient: entry.user,
   };
 }
 
-async function orgIdForQueue(queueId: string): Promise<string | null> {
+export type EntrySnapshot = ReturnType<typeof toEntrySnapshot>;
+
+/** The Klargy ids in an entry snapshot that `refs` translates. */
+export function entryRefSubject(snapshot: EntrySnapshot, actorUserId?: string | null): RefSubject {
+  return {
+    patient: snapshot.patient?.id,
+    visit: snapshot.journeyId,
+    encounter: snapshot.entryId,
+    service: snapshot.service.id,
+    location: snapshot.location.id,
+    servicePoint: snapshot.servicePoint?.id ?? null,
+    staff: actorUserId ?? null,
+  };
+}
+
+export async function entrySnapshot(entryId: string) {
+  const entry = await prisma.queueEntry.findUnique({ where: { id: entryId }, include: ENTRY_SNAPSHOT_INCLUDE });
+  if (!entry) return null;
+  return { organizationId: entry.queue.service.location.organizationId, snapshot: toEntrySnapshot(entry) };
+}
+
+async function queueContext(queueId: string) {
   const q = await prisma.queue.findUnique({
     where: { id: queueId },
-    select: { service: { select: { location: { select: { organizationId: true } } } } },
+    select: { service: { select: { id: true, location: { select: { id: true, organizationId: true } } } } },
   });
-  return q?.service.location.organizationId ?? null;
+  return q ? { organizationId: q.service.location.organizationId, serviceId: q.service.id, locationId: q.service.location.id } : null;
 }
 
 export async function recordQueueEvent(input: QueueEventInput): Promise<void> {
   try {
-    const snap = input.entryId ? await entrySnapshot(input.entryId) : null;
-    const organizationId =
-      input.organizationId ?? snap?.organizationId ?? (input.queueId ? await orgIdForQueue(input.queueId) : null);
+    const snap = input.entryId && !input.payload ? await entrySnapshot(input.entryId) : null;
+    const queueCtx = !snap && input.queueId ? await queueContext(input.queueId) : null;
+    const organizationId = input.organizationId ?? snap?.organizationId ?? queueCtx?.organizationId ?? null;
     if (!organizationId) return;
+    const origin: EventOrigin = input.origin ?? (input.actorUserId ? ORIGIN.staff : ORIGIN.system);
 
     await prisma.auditLog.create({
       data: {
@@ -91,15 +148,33 @@ export async function recordQueueEvent(input: QueueEventInput): Promise<void> {
         action: input.action,
         queueId: input.queueId ?? snap?.snapshot.queueId ?? null,
         entryId: input.entryId ?? null,
-        data: (input.data ?? undefined) as any,
+        data: (origin.type === 'integration' ? { ...(input.data ?? {}), origin } : input.data ?? undefined) as any,
       },
     });
 
     if (WEBHOOK_ACTIONS.has(input.action)) {
-      await dispatchWebhook(organizationId, input.action as WebhookEvent, {
-        ...(snap?.snapshot ?? {}),
-        ...(input.data ?? {}),
-      });
+      const refSubject: RefSubject =
+        input.refSubject ??
+        (snap
+          ? entryRefSubject(snap.snapshot, input.actorUserId)
+          : {
+              patient: typeof input.data?.patientId === 'string' ? input.data.patientId : null,
+              visit: null,
+              encounter: null,
+              service: queueCtx?.serviceId ?? null,
+              location: queueCtx?.locationId ?? null,
+              servicePoint: null,
+              staff: input.actorUserId ?? null,
+            });
+      await dispatchWebhook(
+        organizationId,
+        input.action as WebhookEvent,
+        {
+          ...(input.payload ?? { ...(snap?.snapshot ?? {}), ...(input.data ?? {}) }),
+          origin: { type: origin.type, integrationId: origin.integrationId ?? null },
+        },
+        async (integrationId) => (await buildRefs(integrationId, [refSubject]))[0]
+      );
     }
   } catch (error) {
     console.error(`recordQueueEvent(${input.action}) failed:`, error);
@@ -125,7 +200,12 @@ export async function startJourney(entryId: string): Promise<void> {
   }
 }
 
-export async function closeJourneyIfDone(entryId: string): Promise<void> {
+/** Closes the entry's journey once nothing in it is waiting or being served,
+ * and announces it (journey.completed) when this call is what closed it. */
+export async function closeJourneyIfDone(
+  entryId: string,
+  ctx: { actorUserId?: string | null; origin?: EventOrigin } = {}
+): Promise<void> {
   try {
     const entry = await prisma.queueEntry.findUnique({ where: { id: entryId }, select: { journeyId: true } });
     if (!entry?.journeyId) return;
@@ -136,12 +216,31 @@ export async function closeJourneyIfDone(entryId: string): Promise<void> {
     });
     if (open > 0) return;
     const completedAt = new Date();
-    await prisma.customerJourney.update({
-      where: { id: journey.id },
-      data: {
-        completedAt,
-        totalDuration: Math.round((completedAt.getTime() - journey.startedAt.getTime()) / 60000),
+    const totalDuration = Math.round((completedAt.getTime() - journey.startedAt.getTime()) / 60000);
+    // Only the call that actually closes it announces it.
+    const closed = await prisma.customerJourney.updateMany({
+      where: { id: journey.id, completedAt: null },
+      data: { completedAt, totalDuration },
+    });
+    if (closed.count !== 1) return;
+
+    const owner = await prisma.queueEntry.findUnique({
+      where: { id: entryId },
+      select: {
+        user: { select: { id: true, firstName: true, lastName: true, phone: true, identityData: true } },
+        queue: { select: { service: { select: { location: { select: { organizationId: true } } } } } },
       },
+    });
+    if (!owner) return;
+    await recordQueueEvent({
+      action: 'journey.completed',
+      actorUserId: ctx.actorUserId,
+      origin: ctx.origin,
+      organizationId: owner.queue.service.location.organizationId,
+      entryId,
+      data: { journeyId: journey.id, totalDuration },
+      payload: { journeyId: journey.id, completedAt, totalDuration, patient: owner.user },
+      refSubject: { patient: owner.user.id, visit: journey.id },
     });
   } catch (error) {
     console.error('closeJourneyIfDone failed:', error);
@@ -225,7 +324,7 @@ export class TransferError extends Error {
 export async function transferEntryToService(
   sourceEntryId: string,
   toServiceId: string,
-  opts: { actorUserId?: string | null; priority?: number; completeSource?: boolean } = {}
+  opts: { actorUserId?: string | null; priority?: number; completeSource?: boolean; origin?: EventOrigin } = {}
 ) {
   const source = await prisma.queueEntry.findUnique({
     where: { id: sourceEntryId },
@@ -298,6 +397,7 @@ export async function transferEntryToService(
   await recordQueueEvent({
     action: 'entry.transferred',
     actorUserId: opts.actorUserId,
+    origin: opts.origin,
     queueId: target.queue.id,
     entryId: newEntry.id,
     data: { fromEntryId: source.id, fromServiceId: source.queue.serviceId, toServiceId },
