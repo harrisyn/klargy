@@ -13,6 +13,7 @@ export interface SubscriptionFeatures {
   smsNotifications: boolean;
   analytics: boolean;
   apiAccess: boolean;
+  emrIntegration: boolean;
   customBranding: boolean;
   customDomain: boolean;
   serviceFlows: boolean;
@@ -62,6 +63,7 @@ const DEFAULT_FEATURES: SubscriptionFeatures = {
   smsNotifications: false,
   analytics: false,
   apiAccess: false,
+  emrIntegration: false,
   customBranding: false,
   customDomain: false,
   serviceFlows: false,
@@ -207,6 +209,7 @@ const FEATURE_NAMES: Record<keyof SubscriptionFeatures, string> = {
   smsNotifications: 'Text message alerts',
   analytics: 'Analytics',
   apiAccess: 'API access',
+  emrIntegration: 'An EMR connection',
   customBranding: 'Your own branding',
   customDomain: 'A custom domain',
   serviceFlows: 'Journeys between services',

@@ -102,6 +102,40 @@ export interface WebhookDelivery {
   nextAttemptAt: string | null;
 }
 
+export interface EmrIntegration {
+  id: string;
+  name: string;
+  kind: string;
+  status: 'ACTIVE' | 'REVOKED';
+  keyPrefix: string;
+  systemName: string | null;
+  systemVersion: string | null;
+  registered: boolean;
+  embedOrigins: string[];
+  catalogPublishedAt: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+export type EmrMappableType = 'location' | 'service' | 'service_point' | 'staff';
+
+export interface EmrExternalRecord { id: string; name: string; email?: string | null; locationId?: string | null; kind?: string | null }
+
+export interface EmrIntegrationDetail extends EmrIntegration {
+  externalCatalog: {
+    locations: EmrExternalRecord[];
+    services: EmrExternalRecord[];
+    servicePoints: EmrExternalRecord[];
+    practitioners: EmrExternalRecord[];
+  } | null;
+  klargy: {
+    locations: { id: string; name: string; externalId: string | null }[];
+    services: { id: string; name: string; locationId: string; externalId: string | null }[];
+    servicePoints: { id: string; name: string; type: string; externalId: string | null }[];
+    staff: { id: string; name: string; email: string; externalId: string | null }[];
+  };
+}
+
 export interface AuditLogEntry {
   id: string;
   action: string;
@@ -964,6 +998,36 @@ class ApiClient {
   async getWebhookDeliveries(id: string): Promise<WebhookDelivery[]> {
     const { data } = await this.client.get(`/webhooks/${id}/deliveries`);
     return data;
+  }
+
+  async getEmrIntegrations(organizationId: string): Promise<EmrIntegration[]> {
+    const { data } = await this.client.get(`/orgs/${organizationId}/emr-integrations`);
+    return data;
+  }
+
+  async createEmrIntegration(organizationId: string, name: string): Promise<EmrIntegration & { apiKey: string }> {
+    const { data } = await this.client.post(`/orgs/${organizationId}/emr-integrations`, { name });
+    return data;
+  }
+
+  async getEmrIntegration(id: string): Promise<EmrIntegrationDetail> {
+    const { data } = await this.client.get(`/emr-integrations/${id}`);
+    return data;
+  }
+
+  async rotateEmrIntegrationKey(id: string): Promise<EmrIntegration & { apiKey: string }> {
+    const { data } = await this.client.post(`/emr-integrations/${id}/rotate-key`);
+    return data;
+  }
+
+  async revokeEmrIntegration(id: string): Promise<EmrIntegration> {
+    const { data } = await this.client.post(`/emr-integrations/${id}/revoke`);
+    return data;
+  }
+
+  async setEmrMapping(id: string, payload: { resourceType: EmrMappableType; resourceId: string; externalId: string | null }) {
+    const { data } = await this.client.put(`/emr-integrations/${id}/mappings`, payload);
+    return data as { resourceType: EmrMappableType; klargyId: string; externalId: string | null };
   }
 
   async getAuditLogs(organizationId: string, params?: { action?: string; before?: string; limit?: number }): Promise<{ logs: AuditLogEntry[]; nextCursor: string | null }> {

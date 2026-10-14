@@ -14,6 +14,7 @@ import serviceflowRoutes from './serviceflow.routes';
 import datasourceRoutes from './datasource.routes';
 import superadminRoutes from './superadmin.routes';
 import integrationRoutes from './integration.routes';
+import connectRoutes from './connect.routes';
 import cronRoutes from './cron.routes';
 import aiRoutes from './ai.routes';
 import onboardingRoutes from './onboarding.routes';
@@ -88,6 +89,7 @@ router.get('/tenant/addon-pricing', authenticate, listAddOnPricing);
 router.get('/plans', authenticate, listPlans);
 
 router.use('/cron', cronRoutes);
+router.use('/connect/v1', connectRoutes);
 router.use('/orgs', organizationRoutes);
 router.use('/locations', locationRoutes);
 router.use('/invites', inviteRoutes);

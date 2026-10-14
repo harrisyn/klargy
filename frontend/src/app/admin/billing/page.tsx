@@ -106,6 +106,7 @@ const FEATURE_LABELS: Record<string, string> = {
   customBranding: 'Own logo and colour',
   customDomain: 'Custom domain',
   apiAccess: 'API and integrations',
+  emrIntegration: 'EMR connection',
   displayMedia: 'Adverts on lobby screens',
   // legacy keys from the old plan editor
   multipleLocations: 'More than one location',

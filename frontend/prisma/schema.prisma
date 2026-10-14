@@ -55,6 +55,8 @@ model Organization {
   impersonationLogs     ImpersonationLog[]
   auditLogs             AuditLog[]
   webhookEndpoints      WebhookEndpoint[]
+  integrations          Integration[]
+  externalReferences    ExternalReference[]
   aiInsights            AiInsight[]
   displayMedia          DisplayMedia[]
   displayPlaylists      DisplayPlaylist[]
@@ -812,6 +814,7 @@ model WebhookEndpoint {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   deliveries      WebhookDelivery[]
+  integration     Integration?
 
   @@index([organizationId])
 }
@@ -832,6 +835,65 @@ model WebhookDelivery {
 
   @@index([endpointId, createdAt])
   @@index([status, nextAttemptAt])
+}
+
+// A connection to another system (an EMR today) through Klargy Connect
+// (docs/connect/v1.md). The other system authenticates with the API key
+// (only its SHA-256 hash is stored) and registers the URL Klargy sends its
+// events to, which becomes the integration's own webhook endpoint.
+enum IntegrationStatus {
+  ACTIVE
+  REVOKED
+}
+
+model Integration {
+  id                 String              @id @default(uuid())
+  organizationId     String
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name               String
+  kind               String              @default("EMR")
+  status             IntegrationStatus   @default(ACTIVE)
+  keyHash            String              @unique
+  keyPrefix          String              // first characters of the key, so admins can tell keys apart
+  scopes             String[]
+  // What the other side told us about itself on registration
+  systemName         String?
+  systemVersion      String?
+  webhookEndpointId  String?             @unique
+  webhookEndpoint    WebhookEndpoint?    @relation(fields: [webhookEndpointId], references: [id], onDelete: SetNull)
+  lookupUrl          String?
+  embedOrigins       String[]
+  // The other system's records Klargy records can be mapped to:
+  // {locations, services, servicePoints, practitioners, registrationFields}
+  catalog            Json?
+  catalogPublishedAt DateTime?
+  lastUsedAt         DateTime?
+  createdById        String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  externalReferences ExternalReference[]
+
+  @@index([organizationId])
+}
+
+// Links one Klargy record to the record it mirrors in an integrated system,
+// so the other system never has to store Klargy IDs. resourceType: location,
+// service, service_point, staff (phase 2 adds patient, entry, journey).
+model ExternalReference {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  integrationId  String
+  integration    Integration  @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  resourceType   String
+  resourceId     String       // the Klargy record
+  externalId     String       // the other system's record
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([integrationId, resourceType, resourceId])
+  @@unique([integrationId, resourceType, externalId])
+  @@index([organizationId])
 }
 
 // Superadmin-configured LLM provider (API key encrypted at rest). At most one
