@@ -130,6 +130,9 @@ export const fieldMapping = resolver(async (id) =>
 export const webhookEndpoint = resolver(async (id) =>
   (await prisma.webhookEndpoint.findUnique({ where: { id }, select: { organizationId: true } }))?.organizationId);
 
+export const integration = resolver(async (id) =>
+  (await prisma.integration.findUnique({ where: { id }, select: { organizationId: true } }))?.organizationId);
+
 export const displayMedia = resolver(async (id) =>
   (await prisma.displayMedia.findUnique({ where: { id }, select: { organizationId: true } }))?.organizationId);
 export const displayPlaylist = resolver(async (id) =>

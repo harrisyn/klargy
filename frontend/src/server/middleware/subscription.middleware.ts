@@ -12,6 +12,7 @@ export type FeatureKey =
   | 'smsNotifications'
   | 'analytics'
   | 'apiAccess'
+  | 'emrIntegration'
   | 'customBranding'
   | 'customDomain'
   | 'serviceFlows'
@@ -25,6 +26,7 @@ interface SubscriptionFeatures {
   smsNotifications?: boolean;
   analytics?: boolean;
   apiAccess?: boolean;
+  emrIntegration?: boolean;
   customBranding?: boolean;
   customDomain?: boolean;
   serviceFlows?: boolean;
@@ -50,6 +52,7 @@ const DEFAULT_FEATURES: SubscriptionFeatures = {
   smsNotifications: false,
   analytics: false,
   apiAccess: false,
+  emrIntegration: false,
   customBranding: false,
   customDomain: false,
   serviceFlows: false,

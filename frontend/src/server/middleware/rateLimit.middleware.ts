@@ -59,4 +59,7 @@ export const limits = {
   registerOrg: rateLimit({ name: 'register-org', windowSeconds: 60 * 60, max: 10 }),
   // Generous: one kiosk behind one clinic IP can issue a lot of tickets.
   publicJoin: rateLimit({ name: 'public-join', windowSeconds: 10 * 60, max: 300 }),
+  // Per API key (its first characters) rather than per IP: an EMR's servers
+  // may sit behind one address with many clinics.
+  connect: rateLimit({ name: 'connect', windowSeconds: 60, max: 120, key: (req) => req.headers.authorization?.slice(7, 27) }),
 };

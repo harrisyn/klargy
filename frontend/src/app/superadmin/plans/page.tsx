@@ -90,6 +90,7 @@ const defaultFeatures = [
   { key: 'customBranding', label: 'Own logo and colour' },
   { key: 'customDomain', label: 'Custom domain' },
   { key: 'apiAccess', label: 'API and integrations' },
+  { key: 'emrIntegration', label: 'EMR connection' },
   { key: 'displayMedia', label: 'Adverts on lobby screens' },
 ];
 

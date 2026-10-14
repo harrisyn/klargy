@@ -7,6 +7,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import Layout from '@/components/Layout';
 import { Badge, Button, Checkbox, EmptyState, Input, Modal, PageHeader, Switch } from '@/components/ui';
 import { apiErrorMessage } from '@/components/auth/AuthShell';
+import EmrConnectionsPanel from './EmrConnectionsPanel';
 
 const EVENT_LABELS: Record<string, string> = {
   'entry.joined': 'Someone joined a queue',
@@ -247,6 +248,8 @@ export default function IntegrationsPage() {
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotice(null)}>Dismiss</button>
         </div>
       )}
+
+      <EmrConnectionsPanel />
 
       <div className="panel">
         <div className="panel-header">
