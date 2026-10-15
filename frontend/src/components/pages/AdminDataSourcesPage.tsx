@@ -21,7 +21,7 @@ interface DataSource {
   id: string;
   name: string;
   description?: string;
-  type: 'API' | 'DATABASE' | 'FILE' | 'WEBHOOK';
+  type: 'API' | 'DATABASE' | 'FILE' | 'WEBHOOK' | 'INTEGRATION';
   config: Record<string, unknown>;
   isActive: boolean;
   fieldMappings: FieldMapping[];
@@ -45,6 +45,9 @@ const DATA_SOURCE_TYPES: { value: string; label: string; icon: LucideIcon }[] = 
   { value: 'FILE', label: 'File Import', icon: FileText },
   { value: 'WEBHOOK', label: 'Webhook', icon: Link2 },
 ];
+
+// Set up by an EMR connection (Klargy Connect), not from this page.
+const typeLabel = (type: string) => (type === 'INTEGRATION' ? 'Connected system' : type);
 
 const TRANSFORM_OPTIONS = [
   { value: '', label: 'None' },
@@ -296,13 +299,14 @@ export default function AdminDataSourcesPage() {
   };
 
   const openEditForm = (source: DataSource) => {
+    if (source.type === 'INTEGRATION') return;
     const config = source.config as Record<string, unknown>;
     const auth = config.auth as Record<string, string> | undefined;
     
     setFormData({
       name: source.name,
       description: source.description || '',
-      type: source.type,
+      type: source.type as Exclude<DataSource['type'], 'INTEGRATION'>,
       isActive: source.isActive,
       config: {
         url: (config.url as string) || '',
@@ -369,11 +373,11 @@ export default function AdminDataSourcesPage() {
                   >
                     <div className="source-header">
                       <span className="source-icon">
-                        <Icon icon={DATA_SOURCE_TYPES.find(t => t.value === source.type)?.icon || Package} size={22} color="#0e8f80" />
+                        <Icon icon={DATA_SOURCE_TYPES.find(t => t.value === source.type)?.icon || (source.type === 'INTEGRATION' ? Link2 : Package)} size={22} color="#0e8f80" />
                       </span>
                       <div className="source-info">
                         <h3>{source.name}</h3>
-                        <span className="source-type">{source.type}</span>
+                        <span className="source-type">{typeLabel(source.type)}</span>
                       </div>
                       <div className="source-status">
                         <span className={`status-badge ${source.isActive ? 'active' : 'inactive'}`}>
@@ -402,13 +406,15 @@ export default function AdminDataSourcesPage() {
                       >
                         <Icon icon={source.isActive ? Pause : Play} size={16} />
                       </button>
-                      <button
-                        className="btn-icon"
-                        onClick={(e) => { e.stopPropagation(); openEditForm(source); }}
-                        title="Edit"
-                      >
-                        <Icon icon={Pencil} size={16} />
-                      </button>
+                      {source.type !== 'INTEGRATION' && (
+                        <button
+                          className="btn-icon"
+                          onClick={(e) => { e.stopPropagation(); openEditForm(source); }}
+                          title="Edit"
+                        >
+                          <Icon icon={Pencil} size={16} />
+                        </button>
+                      )}
                       <button
                         className="btn-icon danger"
                         onClick={(e) => { e.stopPropagation(); handleDelete(source.id); }}
@@ -444,7 +450,7 @@ export default function AdminDataSourcesPage() {
                   <div className="config-display">
                     <div className="config-item">
                       <label>Type</label>
-                      <span>{selectedSource.type}</span>
+                      <span>{typeLabel(selectedSource.type)}</span>
                     </div>
                     {selectedSource.type === 'API' && (
                       <>

@@ -209,3 +209,31 @@ export interface SocketEvents {
   'serviceflow.transition': { fromQueueId: string; toQueueId: string; entry: QueueEntry };
   'notification.sent': Notification;
 }
+
+/** A connected EMR's answer to a patient lookup (Klargy Connect phase 4,
+ * docs/connect/v1.md section 7). The EMR runs the cover check. */
+export interface PatientLookup {
+  matched: boolean;
+  patient: {
+    ref?: string;
+    displayName?: string;
+    firstName?: string;
+    mrNumber?: string | null;
+    birthDate?: string | null;
+    gender?: string | null;
+    phoneMasked?: string | null;
+    photoUrl?: string | null;
+    identifiers?: Record<string, string | null>;
+    cover?: {
+      payer: string;
+      plan: string | null;
+      memberNumber: string | null;
+      status: 'active' | 'expired' | 'inactive' | 'unknown';
+      expiresOn: string | null;
+      checkedVia: 'payer' | 'records' | null;
+      message: string | null;
+    } | null;
+    flags?: string[];
+  } | null;
+  candidates: { ref: string; displayName: string; mrNumber: string | null; birthDate: string | null; phoneMasked: string | null }[];
+}

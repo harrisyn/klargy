@@ -27,6 +27,7 @@ describe('Connect routes', () => {
     expect(scopeOf('get', '/entries')).toBe('entries:read');
     expect(scopeOf('post', '/entries')).toBe('entries:write');
     expect(scopeOf('post', '/entries/by-ref/:type/:id/:action')).toBe('entries:write');
+    expect(scopeOf('get', '/entries/by-ref/:type/:id')).toBe('entries:read');
   });
 
   it('guards the desk launch with desk:launch', () => {

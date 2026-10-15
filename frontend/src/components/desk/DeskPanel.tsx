@@ -4,12 +4,24 @@ import React, { useEffect } from 'react';
 import { BellRing, Check, ChevronRight, Loader2, Megaphone, UserX } from 'lucide-react';
 import type { Desk } from './useDesk';
 import { minutesAgo, personName } from './useDesk';
+import PatientCard from './PatientCard';
 
 /**
  * The part of the desk you need while doing something else: who you're
  * serving and the next action. Fits a 320px pop-out window.
  */
-export default function DeskPanel({ desk, compact = false, onDetails }: { desk: Desk; compact?: boolean; onDetails?: () => void }) {
+export default function DeskPanel({
+  desk,
+  compact = false,
+  onDetails,
+  patientCard = !compact,
+}: {
+  desk: Desk;
+  compact?: boolean;
+  onDetails?: () => void;
+  /** The connected EMR's record for the person being served (when there is one). */
+  patientCard?: boolean;
+}) {
   const { current, waiting, busy, error, notice, afterComplete, terms } = desk;
   const next = waiting[0];
 
@@ -39,6 +51,7 @@ export default function DeskPanel({ desk, compact = false, onDetails }: { desk: 
               <button type="button" className="desk-btn desk-btn-quiet" onClick={onDetails}>Details</button>
             )}
           </div>
+          {patientCard && <PatientCard key={current.id} entryId={current.id} />}
         </section>
       ) : afterComplete ? (
         <section className="desk-after" aria-label="Send on">

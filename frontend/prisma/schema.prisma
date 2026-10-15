@@ -40,6 +40,9 @@ model Organization {
   // Patient notification preferences:
   // {"turnApproachingAt": 3, "email": true, "sms": false}
   notificationSettings  Json?
+  // Kiosk and public join ask for this identifier ("mrNumber" or
+  // "memberNumber") and check it with the connected system. Null = off.
+  joinIdentifierType    String?
   // Tenant opt-in for AI-assisted analytics (also needs the plan's "ai" feature)
   aiEnabled             Boolean                  @default(false)
   createdAt             DateTime                 @default(now())
@@ -447,6 +450,7 @@ enum DataSourceType {
   API
   DATABASE
   WEBHOOK
+  INTEGRATION // a connected system's patient lookup (Klargy Connect lookupUrl); config {integrationId}
 }
 
 model DataSource {

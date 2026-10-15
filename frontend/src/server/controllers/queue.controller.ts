@@ -20,6 +20,8 @@ import {
   ORIGIN,
 } from '../services/queueEvents.service';
 import { joinQueueEntry, callEntry, serveEntry, endEntry, QueueActionError } from '../services/queueActions.service';
+import { staffNamesFor } from '../services/displayStaff';
+import { LookupError, joinIdentifierFor, locationRefFor, lookupPatient } from '../services/connectLookup.service';
 
 const actorId = (req: Request) => req.user?.userId ?? null;
 const minutesSince = (from: Date | null | undefined) =>
@@ -563,6 +565,15 @@ export const getPublicStatus = async (req: Request, res: Response, next: NextFun
     const waitingCount = allEntries.filter(e => e.status === 'WAITING').length;
     const servingCount = allEntries.filter(e => e.status === 'SERVING').length;
 
+    // What we've told the patient about this ticket (in-app copies only; the
+    // email and SMS copies say the same thing). No identity in these.
+    const messages = await prisma.notification.findMany({
+      where: { queueEntryId: entry.id, channel: 'IN_APP' },
+      orderBy: { sentAt: 'desc' },
+      take: 20,
+      select: { type: true, message: true, sentAt: true },
+    });
+
     res.json({
       ticketNumber: entry.ticketNumber,
       status: entry.status,
@@ -581,6 +592,7 @@ export const getPublicStatus = async (req: Request, res: Response, next: NextFun
       joinedAt: entry.joinedAt,
       calledAt: entry.calledAt,
       userName: `${entry.user.firstName} ${entry.user.lastName}`.trim(),
+      messages,
     });
   } catch (error) {
     next(error);
@@ -756,7 +768,7 @@ export const publicJoinQueueWithSession = async (req: Request, res: Response, ne
     // Get service and verify it's active
     const service = await prisma.service.findUnique({
       where: { id: serviceId },
-      include: { location: { include: { organization: { select: { status: true } } } } },
+      include: { location: { include: { organization: { select: { id: true, status: true, joinIdentifierType: true } } } } },
     });
 
     if (!service || !service.isActive) {
@@ -777,6 +789,34 @@ export const publicJoinQueueWithSession = async (req: Request, res: Response, ne
       return res.status(400).json({ error: 'Queue is not accepting new entries at this time' });
     }
 
+    // "Require an MR or member number to join": the connected EMR checks it.
+    // If the EMR can't be reached they still get a ticket, marked unchecked.
+    const identity: Record<string, string> = {};
+    let identifierNote: string | null = null;
+    const required = await joinIdentifierFor(service.location.organization);
+    if (required) {
+      const value = typeof req.body.identifier === 'string' ? req.body.identifier.trim().slice(0, 100) : '';
+      if (!value) return res.status(400).json({ error: `Please enter your ${required.label}.`, code: 'IDENTIFIER_REQUIRED' });
+      try {
+        const result = await lookupPatient(required.integration, {
+          identifierType: required.type,
+          identifier: value,
+          context: 'public',
+          locationRef: await locationRefFor(required.integration.id, service.locationId),
+        });
+        if (!result.matched) {
+          return res.status(422).json({
+            error: `We couldn’t find that ${required.label}. Check it and try again, or ask at the front desk.`,
+            code: 'IDENTIFIER_NOT_MATCHED',
+          });
+        }
+      } catch (error) {
+        if (!(error instanceof LookupError)) throw error;
+        identifierNote = `Identifier not verified: the records system couldn’t be reached to check ${required.label} ${value}.`;
+      }
+      identity[required.type] = value;
+    }
+
     // Generate a unique guest email for this entry
     const guestId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const guestEmail = `${guestId}@guest.qms.local`;
@@ -791,6 +831,7 @@ export const publicJoinQueueWithSession = async (req: Request, res: Response, ne
         phone: phone || null,
         role: 'PATIENT',
         organizationId: service.location.organizationId,
+        ...(Object.keys(identity).length ? { identityData: identity } : {}),
       },
     });
 
@@ -815,7 +856,7 @@ export const publicJoinQueueWithSession = async (req: Request, res: Response, ne
         priority: 0,
         sortOrder: nextSortOrder,
         sessionId: userSessionId,
-        notes: notes || null,
+        notes: [notes, identifierNote].filter(Boolean).join('\n') || null,
       },
     });
 
@@ -1085,7 +1126,8 @@ export const getLocationQueues = async (req: Request, res: Response, next: NextF
                   include: {
                     servicePointService: {
                       include: { servicePoint: { select: { id: true, name: true, displayName: true } } }
-                    }
+                    },
+                    occupiedBy: { select: { firstName: true, lastName: true } },
                   }
                 }
               },
@@ -1147,6 +1189,11 @@ export const getLocationQueues = async (req: Request, res: Response, next: NextF
     // Map historical averages to services via queues
     const serviceAvgDurations: Record<string, number> = {};
 
+    // Who's seeing each called person, shown with the room.
+    const staffNames = await staffNamesFor(
+      services.flatMap((s) => s.queues[0]?.entries.filter((e) => e.status === 'SERVING') ?? [])
+    );
+
     // Format response for display
     const swimlanes = await Promise.all(services.map(async (service) => {
       const queue = service.queues[0]; // Today's queue
@@ -1205,6 +1252,7 @@ export const getLocationQueues = async (req: Request, res: Response, next: NextF
           servicePoint: e.servicePointInstance?.servicePointService?.servicePoint
             ? (e.servicePointInstance.servicePointService.servicePoint.displayName || e.servicePointInstance.servicePointService.servicePoint.name)
             : null,
+          staffName: staffNames.get(e.id) ?? null,
           calledAt: e.calledAt,
         })),
         waitingList: waiting.slice(0, 10).map((e, index) => {

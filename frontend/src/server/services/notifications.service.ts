@@ -3,6 +3,7 @@ import { emitToUser, emitToQueue, SOCKET_EVENTS } from '../lib/realtime';
 import { consumeCredits } from '../middleware/subscription.middleware';
 import { sendNotificationEmail } from '../utils/email';
 import { getSmsProvider } from './sms';
+import { statusUrlFor } from '../config/appConfig';
 
 export type QueueNotificationType = 'QUEUE_JOINED' | 'TURN_APPROACHING' | 'NOW_SERVING';
 
@@ -41,15 +42,17 @@ export const WAITING_ORDER = [
 // Walk-in patients get a synthetic guest address - never email those.
 const isRealEmail = (email: string) => !email.endsWith('@guest.qms.local');
 
-function buildMessage(
+export function buildMessage(
   type: QueueNotificationType,
-  ctx: { ticket: string; service: string; position?: number; servicePoint?: string | null }
+  ctx: { ticket: string; service: string; position?: number; servicePoint?: string | null; statusUrl?: string }
 ): { heading: string; message: string } {
   switch (type) {
     case 'QUEUE_JOINED':
       return {
         heading: `You're in the queue: ${ctx.ticket}`,
-        message: `Your ticket for ${ctx.service} is ${ctx.ticket}. We'll let you know when your turn is close.`,
+        message:
+          `Your ticket for ${ctx.service} is ${ctx.ticket}. We'll let you know when your turn is close.` +
+          (ctx.statusUrl ? ` Track your place: ${ctx.statusUrl}` : ''),
       };
     case 'TURN_APPROACHING':
       return ctx.position === 1
@@ -93,7 +96,7 @@ export async function notifyEntry(
           service: {
             select: {
               name: true,
-              location: { select: { organization: { select: { id: true, name: true, notificationSettings: true } } } },
+              location: { select: { organization: { select: { id: true, name: true, slug: true, notificationSettings: true } } } },
             },
           },
         },
@@ -109,6 +112,7 @@ export async function notifyEntry(
     service: entry.queue.service.name,
     position: extra.position,
     servicePoint: extra.servicePointName,
+    statusUrl: statusUrlFor(entry.queueId, entry.id, org.slug),
   });
 
   const inApp = await prisma.notification.create({

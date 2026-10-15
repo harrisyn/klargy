@@ -37,7 +37,11 @@ vi.mock('../../services/queueActions.service', async () => {
   return { QueueActionError, joinQueueEntry: vi.fn(), callEntry: vi.fn(), serveEntry: vi.fn(), endEntry: vi.fn() };
 });
 
-vi.mock('../../services/notifications.service', () => ({ notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
+vi.mock('../../services/notifications.service', () => ({
+  WAITING_ORDER: [],
+  notifyEntry: vi.fn().mockResolvedValue(undefined),
+  notifyPositions: vi.fn(),
+}));
 
 vi.mock('../../services/queueEvents.service', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../services/queueEvents.service')>()),
@@ -47,7 +51,8 @@ vi.mock('../../services/queueEvents.service', async (importOriginal) => ({
 import prisma from '../../lib/prisma';
 import { getOrCreateQueueForDate } from '../../services/queueEvents.service';
 import { QueueActionError, joinQueueEntry, callEntry, serveEntry, endEntry } from '../../services/queueActions.service';
-import { postEntry, postEntryByRef, listEntries, putPatient } from '../connectQueue.controller';
+import { notifyEntry } from '../../services/notifications.service';
+import { postEntry, postEntryByRef, getEntryByRef, listEntries, putPatient } from '../connectQueue.controller';
 
 const integration = { id: 'int1', organizationId: 'org1', scopes: [] };
 const ORIGIN = { type: 'integration', integrationId: 'int1' };
@@ -89,7 +94,10 @@ function entryRow(id: string, status = 'WAITING', extra: Record<string, unknown>
     completedAt: null,
     updatedAt: new Date('2026-10-14T09:00:00Z'),
     user: { id: 'u1', firstName: 'Ama', lastName: 'Mensah', phone: null, identityData: null },
-    queue: { serviceId: 's1', service: { id: 's1', name: 'GP', location: { id: 'l1', name: 'Airport', organizationId: 'org1' } } },
+    queue: {
+      serviceId: 's1',
+      service: { id: 's1', name: 'GP', location: { id: 'l1', name: 'Airport', organizationId: 'org1', organization: { slug: 'nyaho' } } },
+    },
     servicePointInstance: null,
     ...extra,
   };
@@ -131,7 +139,7 @@ beforeEach(() => {
   (prisma.customerJourney.findUnique as any).mockResolvedValue(null);
   (prisma.queueEntry.findFirst as any).mockResolvedValue(null);
   (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
-    (where.id?.in ?? []).map((id: string) => entryRow(id))
+    where.queueId && where.status === 'WAITING' ? [{ id: 'e0' }, { id: 'e1' }] : (where.id?.in ?? []).map((id: string) => entryRow(id))
   );
   (getOrCreateQueueForDate as any).mockResolvedValue({ queue: { id: 'q1', status: 'ACTIVE' } });
   (joinQueueEntry as any).mockImplementation(async (_q: string, _input: unknown, _ctx: unknown, hooks: any) => {
@@ -161,6 +169,24 @@ describe('POST /entries', () => {
     expect(ctx.origin).toEqual(ORIGIN);
   });
 
+  it('sends the patient the “you’ve joined” message for a new ticket, and gives its status page and place in line', async () => {
+    const res = makeRes();
+    await postEntry(makeReq({ body }), res, vi.fn());
+    expect(notifyEntry).toHaveBeenCalledWith('e1', 'QUEUE_JOINED');
+    const { entry } = res.json.mock.calls[0][0];
+    expect(entry.statusUrl).toMatch(/^https?:\/\/nyaho\.[^/]+\/status\/q1\/e1$/);
+    expect(entry.position).toBe(2);
+  });
+
+  it('gives no place in line once the entry is being served', async () => {
+    (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
+      where.status ? [] : where.id.in.map((id: string) => entryRow(id, 'SERVING'))
+    );
+    const res = makeRes();
+    await postEntry(makeReq({ body }), res, vi.fn());
+    expect(res.json.mock.calls[0][0].entry).toMatchObject({ status: 'SERVING', position: null });
+  });
+
   it('replays the first response for a repeated Idempotency-Key', async () => {
     const stored = { entry: { entryId: 'e1' } };
     (prisma.connectIdempotencyKey.create as any).mockRejectedValue(Object.assign(new Error('dup'), { code: 'P2002' }));
@@ -174,6 +200,7 @@ describe('POST /entries', () => {
     expect(res.json).toHaveBeenCalledWith(stored);
     expect(res.headers['Idempotent-Replayed']).toBe('true');
     expect(joinQueueEntry).not.toHaveBeenCalled();
+    expect(notifyEntry).not.toHaveBeenCalled();
   });
 
   it('stores a successful response under the key, and refuses the key for a different request', async () => {
@@ -255,6 +282,7 @@ describe('POST /entries', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json.mock.calls[0][0].entry.entryId).toBe('e0');
     expect(joinQueueEntry).not.toHaveBeenCalled();
+    expect(notifyEntry).not.toHaveBeenCalled();
   });
 
   it('refuses a visit that belongs to another patient', async () => {
@@ -361,6 +389,41 @@ describe('POST /entries/by-ref', () => {
     const res2 = makeRes();
     await postEntryByRef(byRef('entry', 'e1', 'serve'), res2, vi.fn());
     expect(res2.status).toHaveBeenCalledWith(400);
+  });
+});
+
+describe('GET /entries/by-ref', () => {
+  const getRef = (type: string, id: string) =>
+    makeReq({ method: 'GET', params: { type, id }, path: `/entries/by-ref/${type}/${id}` });
+
+  it('returns the visit’s entry being served before one waiting', async () => {
+    refs.push({ resourceType: 'visit', resourceId: 'j1', externalId: 'V1' });
+    (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1', 'e2'] });
+    (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
+      where.status?.in ? [{ id: 'e1' }, { id: 'e2' }] : where.queueId ? [] : where.id.in.map((id: string) => entryRow(id, id === 'e2' ? 'SERVING' : 'WAITING'))
+    );
+    (prisma.queueEntry.findFirst as any).mockImplementation(async ({ where }: any) => ({
+      id: where.id, status: where.id === 'e2' ? 'SERVING' : 'WAITING', queueId: 'q1', queue: { serviceId: 's1' },
+    }));
+    const res = makeRes();
+    await getEntryByRef(getRef('visit', 'V1'), res, vi.fn());
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json.mock.calls[0][0].entry).toMatchObject({ entryId: 'e2', status: 'SERVING', position: null });
+    expect(serveEntry).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 NO_OPEN_ENTRY for a visit with nothing open, ENTRY_NOT_FOUND for an unknown encounter', async () => {
+    const res = makeRes();
+    await getEntryByRef(getRef('visit', 'V-unknown'), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json.mock.calls[0][0].code).toBe('NO_OPEN_ENTRY');
+    const res2 = makeRes();
+    await getEntryByRef(getRef('encounter', 'nope'), res2, vi.fn());
+    expect(res2.status).toHaveBeenCalledWith(404);
+    expect(res2.json.mock.calls[0][0].code).toBe('ENTRY_NOT_FOUND');
+    const res3 = makeRes();
+    await getEntryByRef(getRef('patient', 'P1'), res3, vi.fn());
+    expect(res3.status).toHaveBeenCalledWith(400);
   });
 });
 

@@ -4,6 +4,7 @@ import { generateApiKey } from '../lib/apiKeys';
 import { loadCaller } from '../middleware/tenantScope.middleware';
 import { CONNECT_SCOPES } from '../middleware/integrationAuth.middleware';
 import { MAPPABLE_TYPES, klargyCatalog } from './connect.controller';
+import { syncLookupDataSource } from '../services/connectLookup.service';
 
 // Admin side of EMR connections (Klargy Connect): create an integration and
 // its API key, rotate or revoke the key, and map Klargy records to the
@@ -125,6 +126,7 @@ export const rotateIntegrationKey = async (req: Request, res: Response, next: Ne
       where: { id: req.params.id },
       data: { keyHash: hash, keyPrefix: prefix, status: 'ACTIVE' },
     });
+    await syncLookupDataSource(integration.organizationId).catch((e) => console.error('lookup data source sync failed:', e));
     res.json({ ...publicIntegration(integration), apiKey: key });
   } catch (error) {
     next(error);
@@ -142,6 +144,7 @@ export const revokeIntegration = async (req: Request, res: Response, next: NextF
     if (integration.webhookEndpointId) {
       await prisma.webhookEndpoint.update({ where: { id: integration.webhookEndpointId }, data: { isActive: false } });
     }
+    await syncLookupDataSource(integration.organizationId).catch((e) => console.error('lookup data source sync failed:', e));
     res.json(publicIntegration(integration));
   } catch (error) {
     next(error);

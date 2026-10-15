@@ -28,7 +28,7 @@ interface DisplayServicePoint {
   displayName?: string;
   type: string;
   displayMode: string;
-  currentlyServing: { ticketNumber: string; customerName: string | null; serviceName: string } | null;
+  currentlyServing: { ticketNumber: string; customerName: string | null; serviceName: string; staffName?: string | null } | null;
 }
 
 interface QueueSwimlane {
@@ -38,7 +38,7 @@ interface QueueSwimlane {
   queueId: string | null;
   activeServicePoints: number;
   stats: { serving: number; waiting: number; total: number };
-  currentlyServing: { id: string; ticketNumber: string; customerName: string | null; servicePoint: string | null; calledAt: string }[];
+  currentlyServing: { id: string; ticketNumber: string; customerName: string | null; servicePoint: string | null; staffName?: string | null; calledAt: string }[];
   waitingList: { id: string; ticketNumber: string; customerName: string | null; position: number; estimatedWait: number }[];
   estimatedWaitPerPerson: number;
 }
@@ -48,10 +48,15 @@ interface Call {
   ticketNumber: string;
   customerName: string | null;
   where: string | null;
+  staffName?: string | null;
   serviceName: string;
 }
 
 type ViewMode = 'services' | 'desks' | 'single';
+
+/** "Dr Owusu, Consulting Room 3": who's seeing them, when known, and where. */
+const whereWith = (staffName: string | null | undefined, where: string | null | undefined) =>
+  [staffName, where].filter(Boolean).join(', ');
 
 const DEFAULT_CONFIG: DisplayConfig = {
   ticker: { enabled: false, messages: [], speed: 'normal' },
@@ -278,6 +283,7 @@ export default function TVDisplayPage() {
           ticketNumber: e.ticketNumber,
           customerName: e.customerName,
           where: e.servicePoint,
+          staffName: e.staffName ?? null,
           serviceName: lane.serviceName,
           calledAt: e.calledAt,
         })))
@@ -290,6 +296,7 @@ export default function TVDisplayPage() {
         ticketNumber: sp.currentlyServing!.ticketNumber,
         customerName: sp.currentlyServing!.customerName,
         where: sp.displayName || sp.name,
+        staffName: sp.currentlyServing!.staffName ?? null,
         serviceName: sp.currentlyServing!.serviceName,
       }));
   }, [swimlanes, servicePoints]);
@@ -476,7 +483,7 @@ export default function TVDisplayPage() {
                       <b>{e.ticketNumber}</b>
                       <span className={styles.servingWho}>
                         {e.customerName && <span>{e.customerName}</span>}
-                        {e.servicePoint && <small>{e.servicePoint}</small>}
+                        {(e.servicePoint || e.staffName) && <small>{whereWith(e.staffName, e.servicePoint)}</small>}
                       </span>
                     </li>
                   ))}
@@ -513,7 +520,7 @@ export default function TVDisplayPage() {
               <>
                 <b>{sp.currentlyServing.ticketNumber}</b>
                 {sp.currentlyServing.customerName && <span>{sp.currentlyServing.customerName}</span>}
-                <small>{sp.currentlyServing.serviceName}</small>
+                <small>{whereWith(sp.currentlyServing.staffName, sp.currentlyServing.serviceName)}</small>
               </>
             ) : (
               <p>Ready</p>
@@ -539,7 +546,7 @@ export default function TVDisplayPage() {
               <div key={e.id} className={styles.bigTicket} data-recent={recentKey === e.id}>
                 <b>{e.ticketNumber}</b>
                 {e.customerName && <span>{e.customerName}</span>}
-                {e.servicePoint && <small>{e.servicePoint}</small>}
+                {(e.servicePoint || e.staffName) && <small>{whereWith(e.staffName, e.servicePoint)}</small>}
               </div>
             ))}
           </div>
@@ -635,7 +642,7 @@ export default function TVDisplayPage() {
           <p>Now calling</p>
           <b>{flash.ticketNumber}</b>
           {flash.customerName && <span className={styles.flashName}>{flash.customerName}</span>}
-          <span className={styles.flashWhere}>{flash.where ? <>Please go to <strong>{flash.where}</strong></> : flash.serviceName}</span>
+          <span className={styles.flashWhere}>{flash.where ? <>Please go to <strong>{flash.where}</strong>{flash.staffName && <> to see <strong>{flash.staffName}</strong></>}</> : flash.staffName || flash.serviceName}</span>
         </div>
       )}
 

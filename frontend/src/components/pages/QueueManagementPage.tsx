@@ -22,11 +22,13 @@ import { usePopOut } from '@/components/desk/usePopOut';
 
 type IdentityConfig = Record<string, { required: boolean; label: string; type?: string }>;
 
-function DetailsModal({ entry, onClose }: { entry: DeskEntry; onClose: () => void }) {
+type Source = { id: string; name: string; type: string };
+
+function DetailsModal({ entry, locationId, onClose }: { entry: DeskEntry; locationId?: string; onClose: () => void }) {
   const { user } = useAuthContext();
   const [values, setValues] = useState<Record<string, string>>({});
   const [config, setConfig] = useState<IdentityConfig>({});
-  const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fetching, setFetching] = useState<string | null>(null);
@@ -43,7 +45,9 @@ function DetailsModal({ entry, onClose }: { entry: DeskEntry; onClose: () => voi
         setConfig(((org as { identityFieldsConfig?: IdentityConfig }).identityFieldsConfig) || {});
         if (user?.organizationId) {
           api.getDataSources(user.organizationId)
-            .then((list: { id: string; name: string; isActive: boolean }[]) => setSources(list.filter((s) => s.isActive)))
+            // The connected EMR (Klargy Connect) first: it knows them best.
+            .then((list: (Source & { isActive: boolean })[]) =>
+              setSources(list.filter((s) => s.isActive).sort((a, b) => Number(b.type === 'INTEGRATION') - Number(a.type === 'INTEGRATION'))))
             .catch(() => setSources([]));
         }
       } catch {
@@ -56,12 +60,18 @@ function DetailsModal({ entry, onClose }: { entry: DeskEntry; onClose: () => voi
 
   const fields = Object.entries(config).filter(([key]) => !['firstName', 'lastName', 'name', 'fullName', 'phone', 'email'].includes(key));
 
-  const lookUp = async (sourceId: string) => {
-    if (!entry.user?.phone) return setProblem('They didn’t give a phone number, so there’s nothing to look up.');
-    setFetching(sourceId);
+  const lookUp = async (source: Source) => {
+    // A connected EMR can find them by its own id even without a phone number.
+    const connected = source.type === 'INTEGRATION';
+    if (!entry.user?.phone && !connected) return setProblem('They didn’t give a phone number, so there’s nothing to look up.');
+    setFetching(source.id);
     setProblem('');
     try {
-      const result = await api.fetchFromDataSource(sourceId, { identifier: entry.user.phone, identifierType: 'phone' });
+      const result = await api.fetchFromDataSource(source.id, {
+        identifier: entry.user?.phone || undefined,
+        identifierType: 'phone',
+        ...(connected ? { userId: entry.user?.id, locationId } : {}),
+      });
       if (result.mapped) setValues((v) => ({ ...v, ...result.mapped }));
     } catch (err) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -100,7 +110,7 @@ function DetailsModal({ entry, onClose }: { entry: DeskEntry; onClose: () => voi
           {sources.length > 0 && (
             <div className="desk-details-lookup">
               {sources.map((s) => (
-                <Button key={s.id} variant="secondary" size="sm" onClick={() => lookUp(s.id)} disabled={!!fetching}>
+                <Button key={s.id} variant="secondary" size="sm" onClick={() => lookUp(s)} disabled={!!fetching}>
                   <RefreshCw size={14} /> {fetching === s.id ? 'Looking up…' : `Look up in ${s.name}`}
                 </Button>
               ))}
@@ -280,7 +290,7 @@ export default function QueueManagementPage() {
         </aside>
       </div>
 
-      {details && <DetailsModal entry={details} onClose={() => setDetails(null)} />}
+      {details && <DetailsModal entry={details} locationId={desk.desk.locationId} onClose={() => setDetails(null)} />}
 
       <Modal open={showEmbed} onClose={() => setShowEmbed(false)} title="Use your desk inside another app">
         <div className="desk-embed">

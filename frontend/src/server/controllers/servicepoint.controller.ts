@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
+import { staffNamesFor } from '../services/displayStaff';
 import { screenName } from '../lib/screenName';
 import { recordServicePointEvent } from '../services/servicePointEvents.service';
 
@@ -202,12 +203,17 @@ export const getActiveServicePoints = async (req: Request, res: Response, next: 
               where: { status: 'SERVING' },
               include: { user: { select: { firstName: true, lastName: true } } },
             },
+            occupiedBy: { select: { firstName: true, lastName: true } },
           },
           orderBy: { instanceNumber: 'asc' },
         },
       },
       orderBy: [{ servicePoint: { type: 'asc' } }, { servicePoint: { name: 'asc' } }],
     });
+
+    const staffNames = await staffNamesFor(
+      links.flatMap((l) => l.instances.flatMap((i) => i.servingEntries.map((e) => ({ id: e.id, servicePointInstance: i }))))
+    );
 
     const displayData = links.map((link: typeof links[number]) => {
       const servingInstance = link.instances.find((i: typeof link.instances[number]) => i.servingEntries.length > 0);
@@ -224,6 +230,7 @@ export const getActiveServicePoints = async (req: Request, res: Response, next: 
           ticketNumber: entry.ticketNumber,
           customerName: screenName(displayMode, entry.user.firstName, entry.user.lastName),
           serviceName: link.service.name,
+          staffName: staffNames.get(entry.id) ?? null,
         } : null,
       };
     });

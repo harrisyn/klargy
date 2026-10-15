@@ -31,6 +31,8 @@ interface LocationInfo {
     customerLabel?: string | null;
     customerLabelPlural?: string | null;
   };
+  /** Set when the organisation checks an MR or member number with its EMR before issuing a ticket. */
+  joinIdentifier?: { type: 'mrNumber' | 'memberNumber'; label: string } | null;
   services: {
     id: string;
     name: string;
@@ -261,10 +263,17 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
     
     // Validate required fields
     for (const [fieldKey, fieldConfig] of Object.entries(identityFields)) {
+      if (fieldKey === location?.joinIdentifier?.type) continue; // asked for as `identifier`
       if (fieldConfig.required && !formData[fieldKey]?.trim()) {
         setError(`Please fill in ${fieldConfig.label.toLowerCase()}.`);
         return;
       }
+    }
+
+    const joinIdentifier = location?.joinIdentifier;
+    if (joinIdentifier && !formData.identifier?.trim()) {
+      setError(`Please enter your ${joinIdentifier.label}.`);
+      return;
     }
 
     if (!selectedServiceId) {
@@ -304,6 +313,11 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
+        if (errData.code === 'IDENTIFIER_NOT_MATCHED') {
+          // Ask again: clear the number and put them back in that box.
+          setFormData((f) => ({ ...f, identifier: '' }));
+          setTimeout(() => document.getElementById('field-identifier')?.focus(), 0);
+        }
         throw new Error(errData.message || errData.error || 'Failed to join queue');
       }
 
@@ -559,6 +573,7 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
 
   const renderForm = () => {
     const identityFields = getIdentityFields();
+    const joinIdentifier = location?.joinIdentifier;
     return (
       <form className={styles.card} onSubmit={(e) => { e.preventDefault(); handleJoinQueue(); }}>
         {location && location.services.length > 1 && (
@@ -569,9 +584,25 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
         <h1 className={styles.title}>{location && location.services.length > 1 ? 'Your details' : `Join the ${selectedService?.name || ''} queue`}</h1>
         <p className={styles.lede}>So we can call you when it’s your turn.{waitText(selectedServiceId) ? ` ${waitText(selectedServiceId)}.` : ''}</p>
         <div className={styles.fields}>
+          {joinIdentifier && (
+            <label className={styles.field} htmlFor="field-identifier">
+              <span>Your {joinIdentifier.label}</span>
+              <input
+                id="field-identifier"
+                type="text"
+                autoComplete="off"
+                value={formData.identifier || ''}
+                onChange={(e) => setFormData({ ...formData, identifier: e.target.value })}
+                required
+              />
+              <small className={styles.hint}>We check it with our records before giving you a ticket.</small>
+            </label>
+          )}
           {Object.entries(identityFields).map(([fieldKey, fieldConfig]) => {
             // Kiosks ask only what's needed: names and required fields.
             if (kiosk && !fieldConfig.required && !NAME_FIELDS.includes(fieldKey)) return null;
+            // Already asked for above.
+            if (joinIdentifier && fieldKey === joinIdentifier.type) return null;
             const id = `field-${fieldKey}`;
             const type = fieldConfig.type === 'tel' || fieldKey === 'phone' ? 'tel'
               : fieldConfig.type === 'email' || fieldKey === 'email' ? 'email'

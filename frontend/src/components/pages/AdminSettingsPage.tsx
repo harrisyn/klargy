@@ -41,6 +41,7 @@ interface Organization {
   industry?: string | null;
   customerLabel?: string | null;
   customerLabelPlural?: string | null;
+  joinIdentifierType?: string | null;
 }
 
 type Section = 'general' | 'patient' | 'screens' | 'notifications' | 'branding' | 'domain';
@@ -112,6 +113,8 @@ export default function AdminSettingsPage() {
   const [displayMode, setDisplayMode] = useState('TICKET_ONLY');
   const [notify, setNotify] = useState({ turnApproachingAt: 3, email: true, sms: false });
   const [brand, setBrand] = useState({ primaryColor: '', hidePoweredBy: false });
+  // '' = off; 'mrNumber' | 'memberNumber' = checked with the EMR before a ticket is issued.
+  const [joinIdentifier, setJoinIdentifier] = useState('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [snapshot, setSnapshot] = useState('');
@@ -123,8 +126,8 @@ export default function AdminSettingsPage() {
   const [copied, setCopied] = useState(false);
 
   const current = useMemo(
-    () => JSON.stringify({ general, fields, displayMode, notify, brand }),
-    [general, fields, displayMode, notify, brand]
+    () => JSON.stringify({ general, fields, displayMode, notify, brand, joinIdentifier }),
+    [general, fields, displayMode, notify, brand, joinIdentifier]
   );
   const dirty = snapshot !== '' && current !== snapshot;
 
@@ -144,8 +147,9 @@ export default function AdminSettingsPage() {
         const d = org.defaultDisplayMode || 'TICKET_ONLY';
         const n = { turnApproachingAt: 3, email: true, sms: false, ...(org.notificationSettings || {}) };
         const b = { primaryColor: org.primaryColor || '', hidePoweredBy: !!org.hidePoweredBy };
-        setGeneral(g); setFields(f); setDisplayMode(d); setNotify(n); setBrand(b);
-        setSnapshot(JSON.stringify({ general: g, fields: f, displayMode: d, notify: n, brand: b }));
+        const j = org.joinIdentifierType || '';
+        setGeneral(g); setFields(f); setDisplayMode(d); setNotify(n); setBrand(b); setJoinIdentifier(j);
+        setSnapshot(JSON.stringify({ general: g, fields: f, displayMode: d, notify: n, brand: b, joinIdentifier: j }));
       } catch {
         setMessage({ type: 'error', text: 'Couldn’t load your settings. Refresh to try again.' });
       } finally {
@@ -193,6 +197,7 @@ export default function AdminSettingsPage() {
         identityFieldsConfig,
         defaultDisplayMode: displayMode,
         notificationSettings: notify,
+        joinIdentifierType: joinIdentifier || null,
         // Branding fields are plan-gated server-side; sending them (even as
         // null) on a plan without customBranding rejects the whole save.
         ...(hasFeature('customBranding') ? { primaryColor: brand.primaryColor || null, hidePoweredBy: brand.hidePoweredBy } : {}),
@@ -429,6 +434,20 @@ export default function AdminSettingsPage() {
                 </select>
                 <Button type="button" variant="secondary" onClick={addCustomField} disabled={!newField.label.trim()}>Add</Button>
               </div>
+
+              <h3>Check them against your records</h3>
+              <label className="settings-field settings-narrow">
+                <span>Require an MR or member number to join</span>
+                <select value={joinIdentifier} onChange={(e) => setJoinIdentifier(e.target.value)}>
+                  <option value="">Off</option>
+                  <option value="mrNumber">Ask for their MR number</option>
+                  <option value="memberNumber">Ask for their member number</option>
+                </select>
+                <small>
+                  On the kiosk and the join page. Only works when an EMR connection can look {terms.people} up. A number it
+                  doesn’t know is turned away; if the EMR can’t be reached, they still get a ticket marked “identifier not verified”.
+                </small>
+              </label>
             </section>
           )}
 
