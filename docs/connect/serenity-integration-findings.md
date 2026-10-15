@@ -1,0 +1,183 @@
+# Serenity ↔ Klargy Connect: end-to-end findings
+
+Run on 2026-10-15 against a local Klargy dev server (`http://serenity-emr-sandbox.localhost:3000`, sandbox
+workspace made with `npm run sandbox:create`) and Serenity's local stack (frontend `nyaho.localhost:8084`,
+backend `localhost:9001/v2`, Celery worker, Redis). Serenity code: `core-api-v2` branch `clinic-fixes`
+(plugin migrations up to `20261020_queue_mgmt_phase5_methods`), `emr-nuxt-main` branch `staging-v3`.
+
+Contract: [`docs/connect/v1.md`](v1.md). Section numbers below refer to it.
+
+## 1. What was exercised
+
+| Phase | Flow | Result |
+|---|---|---|
+| 1 | Subscribe the Klargy plugin; Test connection; Register; Publish catalogue; match records in Klargy | Works. Catalogue received: 7 locations, 60 clinics, 0 rooms, 96 practitioners, 7 registration fields. Klargy's match screen grouped department services by kind. |
+| 2 | Serenity visit checked in (walk-in wizard) → ticket in Klargy | Works once the worker runs the task: ticket `G002`, stored on the visit, patient notified. |
+| 3 | Queue desk in the OPD header: launch → room picker → pick room | Works. `klargy:ready`, `desk-changed` and `waiting` messages reached Serenity (header shows the room and a waiting count). `servicepoint.opened` webhook processed. |
+| 3 | Call next from the embedded desk | Works. `entry.called` webhook processed for the right visit. |
+| 4 | Desk asks Serenity for the patient's record (signed lookup, `patientRef`) | Works. Response matches §7: ref, displayName, firstName, mrNumber, birthDate, gender, phoneMasked, photoUrl, identifiers, cover, flags. |
+| 5 | "Send to…" (transfer to laboratory) | Works once the job runs: `G002` → SERVED, new `L001` in Laboratory, same journey. |
+| 5 | Priority, analytics, pause/resume a clinic queue, appointment upsert, `getVisitEntry`, `getMappedServices` | All succeeded. Klargy delivered `entry.priority_changed`, `queue.paused`, `queue.resumed`, `appointment.created`, `appointment.rescheduled`, `journey.completed`, `entry.transferred`, `entry.cancelled`, `entry.joined`; every delivery got a 200. |
+| 2 | Serenity calls and completes a ticket (`updateTicket` call, complete) | Works. |
+
+Not exercised: the automatic journey switches (lab/imaging on orders, cashier first, pharmacy call, urgent
+priority, clinic-closure pause, no-show follow-up) beyond the manual "send"; the desk's Done / Not here
+buttons and the settings that react to them (`sync_no_show`, `start_encounter_on_call`,
+`cancel_on_ticket_cancel`); kiosk and join-page "require an MR or member number"; a phone lookup that
+matches several patients; `GET /entries` catch-up.
+
+## 2. Findings in Serenity (to fix)
+
+Severity: **High** = breaks the flow or loses data silently, **Medium** = wrong or misleading behaviour,
+**Low** = polish or documentation.
+
+### S1 (High): queue tasks are dropped silently when the worker is stale or backed up
+- The running Celery worker did not have `app.tasks.sync_queue_ticket` or `app.tasks.queue_journey_job`
+  registered (it had started before they existed). The visit's ticket task was published and discarded; no
+  ticket was issued, and nothing in Serenity said so. After a restart the tasks registered.
+- `main-queue` held **49,829** messages (periodic tasks piled up while the worker was down). Queue-sync and
+  "Send to…" jobs sit behind that backlog, so tickets and transfers are delayed indefinitely.
+- `notify_queue` / `notify_journey` swallow every error by design ("the request must never notice"), and
+  `POST /v2/queue-management/visits/{id}/send` answers `202 {queued: true}` with no way to see the outcome.
+- Fix: put queue tasks on their own queue (and a worker for it) so bulk or periodic work can't starve them;
+  assert at worker start-up that the queue tasks are registered; record each sync attempt and outcome on the
+  visit (or an admin "queue sync log") with an alert after repeated failure; give "Send to…" a job id and a
+  status the UI can show, instead of a bare 202.
+
+### S2 (High): no catch-up after downtime
+- §5 describes `GET /entries?updatedSince=…` for catching up after downtime. Serenity's vendored client has
+  `list_entries` / `iter_entries`, but nothing in `plugins`, `services`, `tasks` or `api` calls them.
+- Combined with S1, an outage leaves Serenity visits and Klargy tickets out of step with no way back.
+- Fix: a periodic reconciliation task that walks `iter_entries` from the last seen `nextUpdatedSince` and
+  applies the same handlers as the webhooks (deduplicated by entry and status).
+
+### S3 (Medium): desk launch is refused from any origin Serenity wasn't configured with, even though Klargy accepted it
+- `registerIntegration` sends `embedOrigins` to Klargy but stores only `signing_secret` and `integration_id`
+  in the subscription config. Serenity's own allow-list for the desk is the frontend origin built from the
+  organisation slug (here `https://nyaho.staging.serenity.health`) plus `config.embed_origins`, which stays
+  empty. From `http://nyaho.localhost:8084` the desk showed "The queue desk address is not allowed"
+  (`QUEUE_DESK_ORIGIN_NOT_ALLOWED`) while Klargy's CSP already listed that origin.
+- The Queue Management Setup tab has no field for embed origins; the only way to set them was the JSON field
+  in the generic subscribe modal.
+- Fix: add an embed-origins field to the setup tab, persist what registration sends, and show the origins
+  registered with the provider. Consider adding the origin of the request that clicked "Register" by default.
+
+### S4 (Medium): the webhook and lookup URLs Klargy stores come from server config and aren't shown
+- `registerIntegration` builds both URLs from `params.apiBaseUrl`, else `settings.SERVER_HOST` (default
+  `http://api.serenity.health`). The UI button passes no parameters and only says "Registered".
+- A dev, preview or staging deployment can therefore register another environment's URLs without anyone
+  seeing it. For this run the call had to be made from the page with `apiBaseUrl: http://localhost:9001`.
+- Fix: show the registered webhook URL, lookup URL and origins after registering; allow an admin-only
+  override; base the default on a dedicated public-API-URL setting rather than `SERVER_HOST`.
+
+### S5 (Medium): the "someone was called" notice throws
+- `QueueDeskDrawer.notifyCalled` calls `this.$notify(...)`. This app doesn't install Element UI's
+  `$notify` (the only use of it in `emr-nuxt-main`; notifications go through the `openToast` helper in
+  `plugins/element-ui.client.js`). On every `klargy:entry-called` message the console shows
+  `TypeError: this.$notify is not a function`, so the "Called G002 · Name — Open visit" notice never appears.
+- Fix: use the app's toast helper (or import `Notification` from `element-ui`), with a unit test that
+  dispatches an `entry-called` message.
+
+### S6 (Medium): catalogue contents are noisy and ambiguous
+- Klargy's match list shows names only. It contained entries whose names suggest they should not be queue
+  targets (`Inactive Clinic`, `Offline Clinic`, `Test GP parent`, `Zero-Charge Clinic`) and several
+  near-duplicates for one idea (`GP clinic`, `GP Consultation`, `GP Consultation Clinic`,
+  `GP consultation Tema`, `GP consultation - TK`) spread across locations. 60 clinics were sent in total.
+- I did not verify which of the 96 practitioners are inactive.
+- Fix: publish only active, outpatient-bookable clinics and active practitioners; include the location in the
+  display name when two clinics share a name; keep sending `kind` and `locationId`.
+
+### S7 (Low): the plugin still describes itself as phase 1
+- The plugin definition reads "Klargy queue management: webhooks, catalogue publishing." and is `v1.0.0`,
+  while the same record lists 14 methods covering all five phases. Update the description and version when
+  a phase ships.
+
+### S8 (Low): two meanings of "registered"
+- Test connection reported "integration active, registered" (Klargy's view, from a registration made by
+  another client) while the same panel said "Not registered yet" (Serenity's view: no `integration_id` in
+  its config). The label also stays stale until the page is reloaded.
+- Fix: show both facts separately ("Registered with Klargy" from `GET /me`, "Registered by this Serenity
+  organisation" from config), and refresh the label after Register.
+
+### S9 (Low): inbound events are acknowledged but mostly unrecorded
+- All 13 deliveries returned 200, but only `servicepoint.opened` and `entry.called` produced a handler log
+  line. `entry.joined`, `entry.transferred`, `entry.priority_changed`, `journey.completed`, `queue.paused`,
+  `queue.resumed` and `appointment.*` are accepted and nothing is recorded about what was done.
+- The `entry.called` result is `{'ticket_stored': False}` with no explanation.
+- Serenity's own `upsertAppointment` produced `appointment.created` / `appointment.rescheduled` webhooks back
+  to Serenity (an echo). Ignore events whose `origin.integration_id` is this integration, and record
+  "processed" or "ignored (reason)" per delivery.
+
+### S10 (Low): no visible confirmation after "Send to…"
+- The dialog closed on selection and the page showed no confirmation or error. I took the screenshot about
+  8 seconds later, so a short-lived toast may have gone; check that one is shown, and that it reports failure.
+
+## 3. Conformance checks that passed (keep these)
+
+Run with the signing secret against Serenity's public endpoints:
+
+| Check | Expected | Observed |
+|---|---|---|
+| Webhook, no signature | 401 | 401 |
+| Webhook, wrong signature | 401 | 401 |
+| Webhook, valid signature but timestamp 1 hour old | 401 | 401 ("more than 5 minutes from the server clock") |
+| Webhook, body changed after signing | 401 | 401 |
+| Webhook, valid | 200 | 200 |
+| Webhook, same `X-Webhook-Id` again | deduplicated | 200 `{"duplicate": true}` |
+| Webhook, unknown connection id | 404 | 404 |
+| Webhook, malformed JSON with a valid signature | 400 | 400 |
+| Webhook, unknown event type with a valid signature | accepted | 200 |
+| Lookup, unsigned | 401 | 401 |
+| Lookup, staff by MR number / by phone | match | matched, correct shape |
+| Lookup, public context | first name only | `{"patient": {"firstName": …}}` only |
+| Lookup, unknown identifier | `matched: false` | `matched: false`, `candidates: []` |
+| Lookup, bad `identifierType` or `context` | 400 | 400 with the permitted values |
+| API responses to the browser | secrets not returned | API key and signing secret come back masked (8 `*`) |
+
+Rejected deliveries are logged at WARNING with the reason, which is useful for audit.
+
+Notes, not defects: an unknown connection id answers 404 but a known one with a bad signature answers 401,
+so connection ids can be probed (the contract asks for 404 on unknown connections). Error bodies repeat the
+message in `detail`, `user_message` and `technical_message`.
+
+## 4. Findings on the Klargy side (found while running this)
+
+- **K1: `APP_URL` decides the desk address.** `buildAppUrl` uses `APP_URL` plus the workspace slug. With no
+  `APP_URL` the desk launch URL pointed at `…localhost:8003` (the Docker port) and the iframe never answered.
+  Local dev needs `APP_URL=http://localhost:3000`; consider deriving the host from the request when `APP_URL`
+  is unset, or failing loudly.
+- **K2: `MASTER_ENCRYPTION_KEY` has no dev default outside Docker.** `PUT /integration` returned 500
+  `MASTER_ENCRYPTION_KEY is not set`. The error body also carried a `stack` field; make sure production
+  responses never include stack traces.
+- **K3: root `.env` is missing `APP_URL` and `MASTER_ENCRYPTION_KEY`**, which `docker-compose.yml` supplies.
+  Add them to `.env.example`.
+- **K4: workspace host vs API host.** The Connect API authenticates by key and ignores the host, but the
+  desk and status pages need the workspace host (`<slug>.<APP_DOMAIN>`). A Serenity running in Docker can
+  reach Klargy at `host.docker.internal` but cannot resolve `*.localhost`; keep these two addresses separate
+  in the docs for local setups.
+- **K5: Next 16's dev server (re)writes `frontend/AGENTS.md` and `frontend/CLAUDE.md` on start** ("Generated
+  AGENTS.md and CLAUDE.md for AI agents"). They are tracked in this repo, so a dev run can show them as
+  modified; set `agentRules: false` in `next.config.ts` if that isn't wanted.
+
+## 5. Records this run created
+
+The Serenity backend is configured against the **shared staging database** (`emr_stag` on
+`staging.serenity.health`), not a local one. Test writes landed there.
+
+Serenity (staging data):
+- Klargy plugin subscription for the Nyaho organisation (org-plugin 13), holding the sandbox base URL
+  (`http://host.docker.internal:3000`), the sandbox API key, a signing secret and `embed_origins`.
+- Visit `9a7169b0-7e31-496c-89ac-41d93b884ef8` for patient *Baby Yaa Test*: GP Consultation with Duke Kwaku
+  Agbodeka, checked in (registration and consultation charges created), plus its appointment-slot hold and
+  stored queue tickets `G002` and `L001`.
+- A Klargy appointment `int-test-appt-1` (shared as a booked appointment for the same patient).
+- Redis `main-queue`: one pending `sync_queue_ticket` (issue) and one `queue_journey_job` (send), which will
+  run once the backlog clears; both are idempotent against the tickets that already exist.
+
+Klargy (local database):
+- Five Connect migrations applied (`20261014120000` to `20261016090000`) and the Prisma client regenerated.
+- Sandbox workspace "Serenity EMR sandbox" with its admin and EMR connection; the login and key are in the
+  scratchpad file `sandbox.out`, not in the repo.
+
+Suggested clean-up: unsubscribe the plugin (or rotate the sandbox key), end the visit, cancel the test
+appointment, and delete the sandbox workspace when finished.
