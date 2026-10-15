@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "klargy-connect"
+version = "1.0.0"
+description = "Klargy Connect v1 for Python: API client, webhook and patient lookup verification, desk protocol."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Klargy" }]
+keywords = ["klargy", "queue", "emr", "webhooks"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Typing :: Typed",
+  "Framework :: AsyncIO",
+]
+dependencies = ["httpx>=0.24,<1"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.urls]
+Documentation = "https://github.com/harrisyn/queue-management/blob/main/docs/connect/v1.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/klargy_connect"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
