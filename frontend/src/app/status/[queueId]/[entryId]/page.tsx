@@ -534,7 +534,9 @@ export default function QueueStatusPage({
                 </svg>
                 <div>
                   <span style={infoLabel}>Estimated wait</span>
-                  <span style={infoValue}>~{status.estimatedWaitTime} min</span>
+                  <span style={infoValue}>
+                    {status.held ? 'When called back' : status.awaitingClearance ? 'After payment' : `~${status.estimatedWaitTime} min`}
+                  </span>
                 </div>
               </div>
               <div style={infoItem}>
