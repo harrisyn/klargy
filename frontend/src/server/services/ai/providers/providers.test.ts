@@ -40,6 +40,11 @@ describe('OpenAI-compatible adapter', () => {
     expect(sent.messages[2].tool_calls[0]).toEqual({ id: 'call_1', type: 'function', function: { name: 'get_live_status', arguments: '{"locationId":"loc1"}' } });
     expect(sent.messages[3]).toEqual({ role: 'tool', tool_call_id: 'call_1', content: '{"waiting":3}' });
     expect(sent.tools[0].function.name).toBe('get_live_status');
+    // Compatible servers get the widely supported subset only.
+    expect(sent.max_tokens).toBe(16000);
+    expect(sent.max_completion_tokens).toBeUndefined();
+    expect(sent.tools[0].function.strict).toBeUndefined();
+    expect(sent.parallel_tool_calls).toBeUndefined();
     expect(result).toMatchObject({ text: '3 people are waiting.', stop: 'end', usage: { inputTokens: 10, outputTokens: 5 } });
   });
 
@@ -53,7 +58,7 @@ describe('OpenAI-compatible adapter', () => {
         ] },
       }],
     });
-    const provider = createOpenAiProvider({ provider: 'openai', apiKey: 'k', model: 'm' });
+    const provider = createOpenAiProvider({ provider: 'openai_compatible', apiKey: 'k', model: 'm', baseUrl: 'https://llm.example/v1' }, 'openai_compatible');
     const result = await provider.chat({ system: 's', messages: [{ role: 'user', content: 'q' }], tools: [tool] });
     expect(result.stop).toBe('tool_use');
     expect(result.toolCalls).toEqual([
@@ -62,8 +67,9 @@ describe('OpenAI-compatible adapter', () => {
     ]);
   });
 
-  it('requires a model name', () => {
-    expect(() => createOpenAiProvider({ provider: 'openai', apiKey: 'k' })).toThrow(/model/);
+  it('requires a model name and base URL', () => {
+    expect(() => createOpenAiProvider({ provider: 'openai_compatible', apiKey: 'k', baseUrl: 'https://x/v1' }, 'openai_compatible')).toThrow(/model/);
+    expect(() => createOpenAiProvider({ provider: 'openai_compatible', apiKey: 'k', model: 'm' }, 'openai_compatible')).toThrow(/base URL/);
   });
 });
 
