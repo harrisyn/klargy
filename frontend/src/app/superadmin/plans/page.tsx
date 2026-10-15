@@ -87,6 +87,7 @@ const defaultFeatures = [
   { key: 'servicePoints', label: 'Desks and rooms' },
   { key: 'serviceFlows', label: 'Journeys between services' },
   { key: 'smsNotifications', label: 'Text message alerts' },
+  { key: 'whatsappNotifications', label: 'WhatsApp messages' },
   { key: 'customBranding', label: 'Own logo and colour' },
   { key: 'customDomain', label: 'Custom domain' },
   { key: 'apiAccess', label: 'API and integrations' },

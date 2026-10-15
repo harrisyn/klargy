@@ -103,6 +103,7 @@ const FEATURE_LABELS: Record<string, string> = {
   servicePoints: 'Desks and rooms',
   serviceFlows: 'Journeys between services',
   smsNotifications: 'Text message alerts',
+  whatsappNotifications: 'WhatsApp messages',
   customBranding: 'Own logo and colour',
   customDomain: 'Custom domain',
   apiAccess: 'API and integrations',

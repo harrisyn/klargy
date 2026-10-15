@@ -7,6 +7,7 @@ import { generateTicketNumber, getNextSequence, generateQRData } from '../utils/
 import { getStartOfDay, startOfLocalDate, validTimeZone } from '../utils/date';
 import { v4 as uuidv4 } from 'uuid';
 import { CALLABLE_WHERE, WAITING_ORDER, computePosition, notifyEntry } from '../services/notifications.service';
+import { recordWhatsAppOptIn } from '../services/whatsapp/webhook';
 import {
   recordQueueEvent,
   startJourney,
@@ -432,6 +433,9 @@ export const publicJoinQueue = async (req: Request, res: Response, next: NextFun
         organizationId: service.location.organizationId,
       },
     });
+    if (phone && req.body.whatsappOptIn === true) {
+      await recordWhatsAppOptIn(service.location.organizationId, phone, 'join_form').catch((e) => console.error('WhatsApp opt-in not saved:', e));
+    }
 
     // Generate ticket number
     const sequence = await getNextSequence(prisma, queue.id);
@@ -914,6 +918,9 @@ export const publicJoinQueueWithSession = async (req: Request, res: Response, ne
         ...(Object.keys(identity).length ? { identityData: identity } : {}),
       },
     });
+    if (phone && req.body.whatsappOptIn === true) {
+      await recordWhatsAppOptIn(service.location.organizationId, phone, 'join_form').catch((e) => console.error('WhatsApp opt-in not saved:', e));
+    }
 
     // Generate ticket number
     const sequence = await getNextSequence(prisma, queue.id);

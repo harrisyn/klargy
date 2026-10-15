@@ -19,6 +19,7 @@ import {
   startJourney,
 } from '../services/queueEvents.service';
 import { notifyEntry } from '../services/notifications.service';
+import { recordWhatsAppOptIn } from '../services/whatsapp/webhook';
 import {
   QueueActionError,
   callEntry,
@@ -137,6 +138,8 @@ interface PatientInput {
   phone?: string | null;
   email?: string | null;
   identifiers?: Record<string, string>;
+  /** The patient agreed to WhatsApp messages from this organisation. */
+  whatsappOptIn?: boolean;
 }
 
 export function parsePatient(value: unknown, field = 'patient'): PatientInput {
@@ -147,6 +150,10 @@ export function parsePatient(value: unknown, field = 'patient'): PatientInput {
     lastName: text(p.lastName, `${field}.lastName`)!,
   };
   if ('phone' in p) out.phone = text(p.phone, `${field}.phone`, false) ?? null;
+  if (p.whatsappOptIn !== undefined && p.whatsappOptIn !== null) {
+    if (typeof p.whatsappOptIn !== 'boolean') throw badRequest(`${field}.whatsappOptIn must be true or false`);
+    out.whatsappOptIn = p.whatsappOptIn;
+  }
   if ('email' in p) {
     const email = text(p.email, `${field}.email`, false)?.toLowerCase() ?? null;
     if (email && !/^[^\s@]+@[^\s@]+$/.test(email)) throw badRequest(`${field}.email is not an email address`);
@@ -184,6 +191,18 @@ function identityData(existing: unknown, input: PatientInput) {
  * `input` updates the details when given.
  */
 export async function upsertPatient(
+  integration: Caller,
+  externalId: string,
+  input: PatientInput | undefined
+): Promise<{ userId: string; created: boolean }> {
+  const result = await upsertPatientRecord(integration, externalId, input);
+  if (input?.whatsappOptIn === true && input.phone) {
+    await recordWhatsAppOptIn(integration.organizationId, input.phone, 'connect').catch((e) => console.error('WhatsApp opt-in not saved:', e));
+  }
+  return result;
+}
+
+async function upsertPatientRecord(
   integration: Caller,
   externalId: string,
   input: PatientInput | undefined

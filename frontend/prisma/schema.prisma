@@ -63,6 +63,8 @@ model Organization {
   aiInsights            AiInsight[]
   displayMedia          DisplayMedia[]
   displayPlaylists      DisplayPlaylist[]
+  whatsAppConfig        WhatsAppConfig?
+  whatsAppContacts      WhatsAppContact[]
 }
 
 enum OrganizationStatus {
@@ -438,6 +440,7 @@ enum NotificationChannel {
   SMS
   PUSH
   IN_APP
+  WHATSAPP
 }
 
 model Notification {
@@ -450,10 +453,18 @@ model Notification {
   queueEntryId String?
   sentAt    DateTime            @default(now())
   readAt    DateTime?
+  // WhatsApp delivery tracking: the provider's message id and the latest
+  // status its webhook reported (QUEUED, SENT, DELIVERED, READ, FAILED).
+  organizationId    String?
+  providerMessageId String?
+  deliveryStatus    String?
+  deliveryError     String?
+  statusUpdatedAt   DateTime?
   user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   @@index([userId, readAt])
   @@index([queueEntryId, type])
+  @@index([providerMessageId])
 }
 
 model Invite {
@@ -1058,4 +1069,58 @@ model DisplayPlaylistItem {
   sortOrder  Int             @default(0)
 
   @@unique([playlistId, mediaId])
+}
+
+// An organisation's own WhatsApp sender (Settings → WhatsApp). One per org.
+// provider: meta_cloud (WhatsApp Cloud API), twilio, or whatsapp_web (a
+// self-hosted go-whatsapp-web-multidevice server, as Serenity uses).
+model WhatsAppConfig {
+  id                 String       @id @default(uuid())
+  organizationId     String       @unique
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider           String
+  // Send queue and appointment notifications on WhatsApp.
+  isEnabled          Boolean      @default(false)
+  // Non-secret provider settings, e.g. {phoneNumberId, businessAccountId,
+  // apiVersion} | {accountSid, from, messagingServiceSid} | {baseUrl, deviceId}
+  settings           Json         @default("{}")
+  // encrypt(JSON) of the provider's secrets (access token, app secret, auth
+  // token, basic auth, webhook secret). Never returned to the browser.
+  secrets            String?
+  // Meta's webhook verification handshake (hub.verify_token).
+  verifyToken        String
+  // Approved templates per message type:
+  // {"QUEUE_JOINED": {name, language, status, variables: ["ticket", ...], contentSid?}}
+  templates          Json         @default("{}")
+  // Send a text message instead when WhatsApp can't deliver.
+  fallbackToSms      Boolean      @default(true)
+  // EXPLICIT: only numbers that opted in. IMPLIED: any number given, unless it opted out.
+  consentMode        String       @default("EXPLICIT")
+  // Country calling code for numbers typed without one, e.g. "233".
+  defaultCountryCode String?
+  lastTestedAt       DateTime?
+  lastTestOk         Boolean?
+  lastTestMessage    String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+}
+
+// A phone number's WhatsApp consent with one organisation, and when it last
+// wrote to us (WhatsApp allows free-form messages for 24 hours after that).
+model WhatsAppContact {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Digits only, with the country code (e.g. 233200000000).
+  phone          String
+  optedIn        Boolean      @default(false)
+  optedInAt      DateTime?
+  optedOutAt     DateTime?
+  // join_form, staff, inbound
+  source         String?
+  lastInboundAt  DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, phone])
 }

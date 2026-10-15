@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import { joinIdentifierFor } from '../services/connectLookup.service';
+import { whatsappJoinPrompt } from '../services/whatsapp/webhook';
 import { extractSubdomain, extractCustomDomainCandidate } from '../../lib/subdomain';
 
 export const createLocation = async (req: Request, res: Response, next: NextFunction) => {
@@ -192,6 +193,7 @@ export const getLocationByCode = async (req: Request, res: Response, next: NextF
       ...location,
       organization,
       joinIdentifier: required ? { type: required.type, label: required.label } : null,
+      whatsapp: await whatsappJoinPrompt(location.organization.id).catch(() => null),
     });
   } catch (error) {
     next(error);

@@ -2,7 +2,8 @@ import prisma from '../lib/prisma';
 import { emitToUser, emitToQueue, SOCKET_EVENTS } from '../lib/realtime';
 import { consumeCredits } from '../middleware/subscription.middleware';
 import { sendNotificationEmail } from '../utils/email';
-import { getSmsProvider } from './sms';
+import { deliverToPhone } from './phoneDelivery';
+import { templateKeyFor } from './whatsapp/util';
 import { statusUrlFor } from '../config/appConfig';
 
 export type QueueNotificationType = 'QUEUE_JOINED' | 'TURN_APPROACHING' | 'NOW_SERVING' | 'QUEUE_DELAYED';
@@ -107,13 +108,13 @@ export async function notifyEntry(
   const entry = await prisma.queueEntry.findUnique({
     where: { id: entryId },
     include: {
-      user: { select: { id: true, email: true, phone: true } },
+      user: { select: { id: true, email: true, phone: true, firstName: true } },
       queue: {
         include: {
           service: {
             select: {
               name: true,
-              location: { select: { organization: { select: { id: true, name: true, slug: true, notificationSettings: true } } } },
+              location: { select: { name: true, organization: { select: { id: true, name: true, slug: true, notificationSettings: true } } } },
             },
           },
         },
@@ -124,13 +125,14 @@ export async function notifyEntry(
 
   const org = entry.queue.service.location.organization;
   const settings = readNotificationSettings(org.notificationSettings);
+  const statusUrl = statusUrlFor(entry.queueId, entry.id, org.slug);
   const { heading, message } = buildMessage(type, {
     ticket: entry.ticketNumber,
     service: entry.queue.service.name,
     position: extra.position,
     servicePoint: extra.servicePointName,
     text: extra.text,
-    statusUrl: statusUrlFor(entry.queueId, entry.id, org.slug),
+    statusUrl,
   });
 
   const inApp = await prisma.notification.create({
@@ -152,21 +154,30 @@ export async function notifyEntry(
     }
   }
 
-  if (settings.sms && entry.user.phone) {
-    const provider = await getSmsProvider();
-    if (provider) {
-      const credit = await consumeCredits(org.id, 'SMS', 1, `queue notification ${type}`);
-      if (credit.allowed) {
-        const sent = await provider.send(entry.user.phone, `${org.name}: ${message}`);
-        if (sent.success) {
-          await prisma.notification.create({
-            data: { userId: entry.user.id, type, channel: 'SMS', message, queueEntryId: entry.id, readAt: new Date() },
-          });
-        } else {
-          console.error('SMS send failed:', sent.error);
-        }
-      }
-    }
+  // WhatsApp when the org has it on, then SMS (its own setting, or as the
+  // WhatsApp fallback).
+  if (entry.user.phone) {
+    await deliverToPhone({
+      organizationId: org.id,
+      orgName: org.name,
+      userId: entry.user.id,
+      phone: entry.user.phone,
+      type,
+      templateKey: templateKeyFor(type, { transferred: !!entry.previousEntryId }),
+      message,
+      vars: {
+        name: entry.user.firstName,
+        ticket: entry.ticketNumber,
+        service: entry.queue.service.name,
+        location: entry.queue.service.location.name,
+        position: extra.position,
+        servicePoint: extra.servicePointName,
+        statusUrl,
+      },
+      dedupeKey: entry.id,
+      smsEnabled: settings.sms,
+      creditReason: `queue notification ${type}`,
+    });
   }
 }
 
