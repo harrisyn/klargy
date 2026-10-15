@@ -21,7 +21,7 @@ const DESKS = [930, 1040, 1150];
 const EXIT_X = SCENE_W + 60;
 const TICK_MS = 2600;
 
-const OUTFITS = ['#5b7fa6', '#8aa39b', '#c08a5b', '#6f6a93', '#9c6b6b', '#4f7d74', '#b59a55', '#7a8c9e'];
+const OUTFITS = ['#5b7fa6', '#9cbab9', '#c08a5b', '#6f6a93', '#9c6b6b', '#3b7f99', '#b59a55', '#7a8c9e'];
 const SKIN = ['#f1d3b8', '#d9a67e', '#a86f4c', '#6e4630'];
 
 type Phase = 'door' | 'kiosk' | 'line' | 'called' | 'leaving';
@@ -173,14 +173,14 @@ function Figure({ person }: { person: Person }) {
         {/* body */}
         <rect x="-15" y="-74" width="30" height="48" rx="13" fill={called ? 'var(--primary-500)' : person.outfit} />
         {/* phone glow when they have a ticket */}
-        {person.hasTicket && !called && <rect x="8" y="-58" width="7" height="11" rx="2" fill="#dff5f1" opacity="0.9" />}
+        {person.hasTicket && !called && <rect x="8" y="-58" width="7" height="11" rx="2" fill="#dcf2f3" opacity="0.9" />}
         {/* head */}
         <circle cx="0" cy="-88" r="12" fill={person.skin} />
       </g>
       {person.hasTicket && person.phase !== 'leaving' && (
         <g className={called ? styles.ticketCalled : styles.ticket} transform="translate(0,-114)">
           <rect x="-22" y="-11" width="44" height="20" rx="5" fill={called ? 'var(--primary-500)' : 'var(--amber-400)'} />
-          <text x="0" y="3.5" textAnchor="middle" fontSize="11" fontWeight="700" fill={called ? 'white' : '#1c2733'}>
+          <text x="0" y="3.5" textAnchor="middle" fontSize="11" fontWeight="700" fill={called ? 'white' : '#0d2a47'}>
             {person.ticket}
           </text>
         </g>
@@ -194,7 +194,7 @@ function Desk({ x, number, busy }: { x: number; number: number; busy: boolean })
     <g transform={`translate(${x}, ${FLOOR_Y})`}>
       {/* staff member behind the counter */}
       <circle cx="0" cy="-102" r="11" fill={SKIN[(number * 3) % SKIN.length]} />
-      <rect x="-14" y="-90" width="28" height="30" rx="11" fill="#2f5d58" />
+      <rect x="-14" y="-90" width="28" height="30" rx="11" fill="#1d4f7a" />
       {/* counter */}
       <rect x="-44" y="-62" width="88" height="62" rx="6" fill="#dfe6e3" />
       <rect x="-44" y="-62" width="88" height="8" rx="4" fill="#c7d2cd" />
@@ -265,11 +265,11 @@ export default function LobbyScene() {
       {/* kiosk */}
       <g transform={`translate(${KIOSK_X}, ${FLOOR_Y})`}>
         <rect x="-8" y="-66" width="16" height="66" rx="4" fill="#9aa9b5" />
-        <rect x="-26" y="-116" width="52" height="56" rx="8" fill="#1c2733" />
+        <rect x="-26" y="-116" width="52" height="56" rx="8" fill="#0d2a47" />
         <rect x="-19" y="-108" width="38" height="40" rx="4" fill="#243444" />
         {/* QR squares */}
         {[[0, 0], [1, 0], [0, 1], [2, 2], [3, 1], [1, 3], [3, 3], [2, 0], [0, 3]].map(([cx, cy], i) => (
-          <rect key={i} x={-14 + cx * 7.5} y={-103 + cy * 7.5} width="6" height="6" rx="1" fill="#dff5f1" />
+          <rect key={i} x={-14 + cx * 7.5} y={-103 + cy * 7.5} width="6" height="6" rx="1" fill="#dcf2f3" />
         ))}
         <text x="0" y="-122" textAnchor="middle" fontSize="11" fontWeight="600" fill="#5b6977">
           Scan to join
@@ -278,7 +278,7 @@ export default function LobbyScene() {
 
       {/* now-serving board */}
       <g transform="translate(868, 36)">
-        <rect width="304" height="86" rx="10" fill="#1c2733" />
+        <rect width="304" height="86" rx="10" fill="#0d2a47" />
         <text x="20" y="30" fontSize="13" fontWeight="600" fill="#8fa0ae">
           Now serving
         </text>

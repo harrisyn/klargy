@@ -98,7 +98,7 @@ export const ServicePointsDeskPicker: React.FC<ServicePointsDeskPickerProps> = (
         }
         .desk-picker-row.selected {
           border-color: var(--primary);
-          background: rgba(14, 143, 128, 0.06);
+          background: rgba(15, 159, 164, 0.06);
         }
         .desk-picker-checkbox {
           display: flex;

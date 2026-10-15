@@ -426,7 +426,7 @@ export const AddServiceWizard: React.FC<AddServiceWizardProps> = ({ organization
         }
         .day-btn.selected {
           border-color: var(--primary);
-          background: rgba(14, 143, 128, 0.1);
+          background: rgba(15, 159, 164, 0.1);
           color: var(--primary);
         }
         .checkbox-group label {
@@ -455,7 +455,7 @@ export const AddServiceWizard: React.FC<AddServiceWizardProps> = ({ organization
         }
         .scope-option.selected {
           border-color: var(--primary);
-          background: rgba(14, 143, 128, 0.06);
+          background: rgba(15, 159, 164, 0.06);
         }
         .scope-option span {
           font-size: 0.8rem;

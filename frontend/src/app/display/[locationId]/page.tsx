@@ -439,7 +439,7 @@ export default function TVDisplayPage() {
     );
   }
 
-  const accent = location?.organization?.primaryColor || '#0e8f80';
+  const accent = location?.organization?.primaryColor || '#0f9fa4';
   const terms = termsFor(location?.organization);
   const joinCode = location?.publicCode;
   const joinUrl = joinCode && typeof window !== 'undefined' ? `${window.location.origin}/join/${joinCode}` : null;

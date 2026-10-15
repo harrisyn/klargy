@@ -76,7 +76,7 @@ export default function AcceptInvitePage({ code }: { code: string }) {
   if (!preview) {
     return (
       <AuthShell title="Checking your invite">
-        <Loader2 className="qf-spin" size={22} color="#0e8f80" aria-label="Loading" />
+        <Loader2 className="qf-spin" size={22} color="#0f9fa4" aria-label="Loading" />
       </AuthShell>
     );
   }

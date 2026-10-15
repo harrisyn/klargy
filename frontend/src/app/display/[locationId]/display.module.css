@@ -9,7 +9,7 @@
   --text: #eef2f4;
   --muted: #93a3b1;
   --ticket: #f5c451;
-  --accent: #0e8f80;
+  --accent: #0f9fa4;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -20,11 +20,11 @@
   font-family: var(--font-sans);
 }
 .screen[data-theme='light'] {
-  --bg: #f3f5f2;
+  --bg: #f2f6f5;
   --surface: #ffffff;
   --surface-2: #eef1ed;
   --line: rgba(28, 39, 51, 0.1);
-  --text: #1c2733;
+  --text: #0d2a47;
   --muted: #5b6b78;
   --ticket: #b7791f;
 }

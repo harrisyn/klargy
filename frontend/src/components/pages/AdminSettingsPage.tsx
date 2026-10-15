@@ -76,7 +76,7 @@ const DISPLAY_MODES = [
   { value: 'FULL_INFO', label: 'Number, full name and service', note: 'Only where names on a screen are acceptable.' },
 ];
 
-const COLOR_PRESETS = ['#0e8f80', '#2563eb', '#7c3aed', '#c2410c', '#15803d', '#be123c', '#1c2733'];
+const COLOR_PRESETS = ['#0f9fa4', '#2563eb', '#7c3aed', '#c2410c', '#15803d', '#be123c', '#0d2a47'];
 
 function fieldsFromConfig(config?: FieldConfig): IdentityField[] {
   if (!config || Object.keys(config).length === 0) {
@@ -270,7 +270,7 @@ export default function AdminSettingsPage() {
   }
 
   const standardAvailable = STANDARD_FIELDS.filter((f) => !fields.some((x) => x.key === f.key));
-  const accent = brand.primaryColor || '#0e8f80';
+  const accent = brand.primaryColor || '#0f9fa4';
 
   return (
     <Layout>
