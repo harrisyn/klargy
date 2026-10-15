@@ -26,12 +26,14 @@ export type QueueAction =
   | 'appointment.rescheduled'
   | 'appointment.cancelled'
   | 'appointment.checked_in'
-  | 'journey.completed';
+  | 'journey.completed'
+  | 'servicepoint.opened'
+  | 'servicepoint.closed';
 
 const WEBHOOK_ACTIONS = new Set<string>([
   'entry.joined', 'entry.called', 'entry.served', 'entry.cancelled', 'entry.no_show', 'entry.transferred',
   'appointment.created', 'appointment.rescheduled', 'appointment.cancelled', 'appointment.checked_in',
-  'journey.completed',
+  'journey.completed', 'servicepoint.opened', 'servicepoint.closed',
 ]);
 
 /** Who caused an event (docs/connect/v1.md section 4). */

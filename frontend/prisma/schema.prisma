@@ -392,6 +392,7 @@ model User {
   activatedServicePoints ServicePointService[] @relation("ActivatedServicePoints")
   occupiedInstances     ServicePointInstance[] @relation("OccupiedInstances")
   journeys              CustomerJourney[]
+  deskLaunchCodes       DeskLaunchCode[]
   
   @@index([browserFingerprint])
 }
@@ -874,8 +875,30 @@ model Integration {
   updatedAt          DateTime            @updatedAt
   externalReferences ExternalReference[]
   idempotencyKeys    ConnectIdempotencyKey[]
+  deskLaunchCodes    DeskLaunchCode[]
 
   @@index([organizationId])
+}
+
+// One-time code an integration gets to open the staff desk inside its own
+// app (Klargy Connect phase 3). Only a SHA-256 hash of the code is kept. The
+// row outlives the code (usedAt set) because the launched desk uses its id
+// to look up the integration's references for the rest of the session.
+model DeskLaunchCode {
+  id             String      @id @default(uuid())
+  codeHash       String      @unique
+  integrationId  String
+  integration    Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  origin         String      // the only origin the launched desk talks to
+  servicePointId String?     // Klargy service point to preselect
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime    @default(now())
+
+  @@index([integrationId])
+  @@index([createdAt])
 }
 
 // Idempotency-Key replay for Klargy Connect writes (24 hours). statusCode 0

@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import type { Service } from '@/types';
+import type { Service, User } from '@/types';
 
 import { API_BASE as API_BASE_URL } from '@/lib/apiBase';
 
@@ -231,6 +231,28 @@ class ApiClient {
   // Auth
   async login(email: string, password: string, options?: { slug?: string; adminLogin?: boolean }) {
     const { data } = await this.client.post('/auth/login', { email, password, ...options });
+    return data;
+  }
+
+  // Klargy Connect desk launch: trade the EMR's one-time code for a session.
+  async exchangeDeskLaunch(code: string): Promise<{
+    token: string;
+    user: User;
+    launchId: string;
+    origin: string;
+    servicePointId: string | null;
+  }> {
+    const { data } = await this.client.post('/auth/desk-launch', { code });
+    return data;
+  }
+
+  async getLaunchDesk(launchId: string, instanceId: string): Promise<{ servicePoint: { id: string; name: string; externalId: string | null } }> {
+    const { data } = await this.client.get(`/desk-launches/${encodeURIComponent(launchId)}/desks/${encodeURIComponent(instanceId)}`);
+    return data;
+  }
+
+  async getLaunchEntry(launchId: string, entryId: string): Promise<{ entry: Record<string, unknown> }> {
+    const { data } = await this.client.get(`/desk-launches/${encodeURIComponent(launchId)}/entries/${encodeURIComponent(entryId)}`);
     return data;
   }
 
@@ -955,7 +977,7 @@ class ApiClient {
     return data;
   }
 
-  async transferEntry(queueId: string, entryId: string, serviceId: string): Promise<{ ticketNumber: string; serviceName: string; queueId: string }> {
+  async transferEntry(queueId: string, entryId: string, serviceId: string): Promise<{ entry?: { id: string }; ticketNumber: string; serviceName: string; queueId: string }> {
     const { data } = await this.client.post(`/queues/${queueId}/entry/${entryId}/transfer`, { serviceId });
     return data;
   }

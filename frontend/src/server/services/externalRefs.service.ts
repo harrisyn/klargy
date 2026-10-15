@@ -72,11 +72,12 @@ export async function klargyIdFor(integrationId: string, resourceType: RefType, 
  * Points an external id at a Klargy record, one to one: the external id
  * leaves any other Klargy record, and the Klargy record drops any other
  * external id. Used for the references Connect calls create (patient, visit,
- * encounter), never for admin mappings.
+ * encounter, and staff when a desk launch matches or registers someone),
+ * never by the admin mapping screen.
  */
 export async function linkRef(
   integration: { id: string; organizationId: string },
-  resourceType: (typeof CONNECT_REF_TYPES)[number],
+  resourceType: (typeof CONNECT_REF_TYPES)[number] | 'staff',
   resourceId: string,
   externalId: string
 ): Promise<void> {

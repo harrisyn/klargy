@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import { screenName } from '../lib/screenName';
+import { recordServicePointEvent } from '../services/servicePointEvents.service';
 
 // Ensure a service-point-to-service assignment has exactly `capacity` active
 // ServicePointInstance rows. Creates missing instances and deactivates
@@ -580,6 +581,15 @@ export const activateServicePointInstance = async (req: Request, res: Response, 
       },
     });
 
+    // Re-entering your own desk changes nothing; taking over someone's
+    // desk closes it for them first.
+    if (!(instance.isOccupied && instance.occupiedByUserId === userId)) {
+      if (instance.isOccupied && instance.occupiedByUserId) {
+        await recordServicePointEvent('closed', instance.id, instance.occupiedByUserId, userId);
+      }
+      await recordServicePointEvent('opened', instance.id, userId, userId);
+    }
+
     res.json(updated);
   } catch (error) {
     next(error);
@@ -618,6 +628,10 @@ export const vacateServicePointInstance = async (req: Request, res: Response, ne
         occupiedAt: null,
       },
     });
+
+    if (instance.isOccupied && instance.occupiedByUserId) {
+      await recordServicePointEvent('closed', instance.id, instance.occupiedByUserId, userId);
+    }
 
     res.json(updated);
   } catch (error) {
@@ -722,6 +736,10 @@ export const toggleInstanceActive = async (req: Request, res: Response, next: Ne
         } : {}),
       },
     });
+
+    if (isActive === false && instance.isOccupied && instance.occupiedByUserId) {
+      await recordServicePointEvent('closed', instance.id, instance.occupiedByUserId, (req as any).user?.userId ?? null);
+    }
 
     res.json(updated);
   } catch (error) {

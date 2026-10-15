@@ -5,6 +5,7 @@ import { signToken } from '../lib/jwt';
 import { verifyCode, issueToken, consumeToken, normalizeEmail } from '../lib/verification';
 import { sendOTPEmail, sendPasswordResetEmail } from '../utils/email';
 import { buildAppUrl } from '../config/appConfig';
+import { isLaunchOnlyUser } from '../lib/connectStaff';
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -84,6 +85,12 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
     // Guest (patient) users have an empty password and can never log in.
     if (!user || !user.password || !user.isActive) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Staff an EMR registered through Klargy Connect only ever reach the
+    // desk through that EMR (a desk launch), never with a password.
+    if (isLaunchOnlyUser(user.identityData)) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -187,9 +194,9 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
 
     const user = await prisma.user.findUnique({
       where: { email: normalizeEmail(email) },
-      select: { email: true, password: true, isActive: true, role: true, organization: { select: { slug: true } } },
+      select: { email: true, password: true, isActive: true, role: true, identityData: true, organization: { select: { slug: true } } },
     });
-    if (!user || !user.password || !user.isActive) return res.json(response);
+    if (!user || !user.password || !user.isActive || isLaunchOnlyUser(user.identityData)) return res.json(response);
 
     const token = await issueToken('PASSWORD_RESET', user.email, 60);
     // Send the link to the subdomain the user actually logs in on.
