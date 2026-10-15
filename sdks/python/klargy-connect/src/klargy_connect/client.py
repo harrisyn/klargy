@@ -170,15 +170,16 @@ class _Endpoints:
 
     def create_entry(self, body: Body, *, idempotency_key: Optional[str] = None, timeout: Optional[float] = None):
         """POST /entries `{refs: {patient, visit, appointment?, encounter?}, patient?, service, priority?,
-        notes?}` -> `{entry}`: 201 for a new ticket, 200 for the visit's open entry in that service."""
+        notes?, cleared?}` -> `{entry}`: 201 for a new ticket, 200 for the visit's open entry in that service."""
         return self._send(_Call("POST", "/entries", body, idempotency_key=idempotency_key, timeout=timeout))
 
     def entry_action(self, ref_type: str, ref_id: str, action: str, body: Optional[Body] = None, *,
                      idempotency_key: Optional[str] = None, timeout: Optional[float] = None):
         """POST /entries/by-ref/{type}/{id}/{action}. `ref_type` is visit, encounter or entry; `action`
-        is call, complete, cancel, no-show, transfer or priority. Body fields (all optional except as
-        the action needs): service (narrows a visit's entry), encounter, servicePoint (call), staff,
-        reason, to (transfer), priority (transfer, priority)."""
+        is call, complete, cancel, no-show, hold, resume, clear, transfer or priority. Body fields (all
+        optional except as the action needs): service (narrows a visit's entry), encounter,
+        servicePoint (call, resume), staff, reason, to (transfer), priority (transfer, priority),
+        cleared (transfer)."""
         _check_ref(ref_type, ref_id)
         if action not in ENTRY_ACTIONS:
             raise ValueError(f"action must be one of {list(ENTRY_ACTIONS)}")
@@ -186,7 +187,8 @@ class _Endpoints:
                                 body if body is not None else {}, idempotency_key=idempotency_key, timeout=timeout))
 
     def call_entry(self, ref_type: str, ref_id: str, body: Optional[Body] = None, **kw: Any):
-        """`call` (WAITING -> SERVING); body may name `servicePoint`."""
+        """`call` (WAITING -> SERVING); body may name `servicePoint`, or `staff` to call into the room
+        that staff member is signed in to (409 ENTRY_IN_OTHER_SERVICE when the visit is elsewhere)."""
         return self.entry_action(ref_type, ref_id, "call", body, **kw)
 
     def complete_entry(self, ref_type: str, ref_id: str, body: Optional[Body] = None, **kw: Any):
@@ -200,6 +202,26 @@ class _Endpoints:
     def no_show_entry(self, ref_type: str, ref_id: str, body: Optional[Body] = None, **kw: Any):
         """`no-show` (-> NO_SHOW)."""
         return self.entry_action(ref_type, ref_id, "no-show", body, **kw)
+
+    def hold_entry(self, ref_type: str, ref_id: str, body: Optional[Body] = None, **kw: Any):
+        """`hold`: the entry being served leaves the room and keeps its place (`held: true`)."""
+        return self.entry_action(ref_type, ref_id, "hold", body, **kw)
+
+    def resume_entry(self, ref_type: str, ref_id: str, body: Optional[Body] = None, **kw: Any):
+        """`resume`: calls a held entry back to `servicePoint`, else `staff`'s room, else the room it
+        was held in."""
+        return self.entry_action(ref_type, ref_id, "resume", body, **kw)
+
+    def clear_entry(self, ref_type: str, ref_id: str, body: Optional[Body] = None, **kw: Any):
+        """`clear`: payment settled; an entry awaiting clearance joins the line."""
+        return self.entry_action(ref_type, ref_id, "clear", body, **kw)
+
+    def link_serving_entry(self, body: Body, *, idempotency_key: Optional[str] = None,
+                           timeout: Optional[float] = None):
+        """POST /entries/serving/link `{staff, refs: {patient, visit, encounter?}, patient?}` -> `{entry}`:
+        links the entry being served in `staff`'s room. 404 NO_SERVING_ENTRY when there is none."""
+        return self._send(_Call("POST", "/entries/serving/link", body, idempotency_key=idempotency_key,
+                                timeout=timeout))
 
     def transfer_entry(self, ref_type: str, ref_id: str, body: Body, **kw: Any):
         """`transfer` `{to, service?, priority?, encounter?, staff?, reason?}` -> `{entry, from}`: 201

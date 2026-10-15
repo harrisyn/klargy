@@ -73,6 +73,8 @@ class CreateEntryBody(TypedDict, total=False):
     service: str
     priority: int
     notes: Optional[str]
+    cleared: bool
+    """Payment already settled: skips the service's payment gate."""
 
 
 class EntryActionBody(TypedDict, total=False):
@@ -86,6 +88,39 @@ class EntryActionBody(TypedDict, total=False):
     reason: str
     to: str
     priority: int
+    cleared: bool
+    """transfer: payment already settled, skips the target service's payment gate."""
+
+
+class ServingLinkRefs(TypedDict, total=False):
+    patient: str
+    visit: str
+    encounter: Optional[str]
+
+
+class ServingLinkBody(TypedDict, total=False):
+    """POST /entries/serving/link. `staff` and `refs.patient`/`refs.visit` are required."""
+
+    staff: str
+    refs: ServingLinkRefs
+    patient: PatientBody
+
+
+class JourneyService(TypedDict):
+    id: str
+    ref: Optional[str]
+    name: str
+
+
+class JourneyStep(TypedDict):
+    """One stop in an entry's `journey` (oldest first)."""
+
+    entryId: str
+    ticketNumber: str
+    service: JourneyService
+    status: str
+    joinedAt: str
+    endedAt: Optional[str]
 
 
 class DeskStaff(TypedDict, total=False):

@@ -19,6 +19,10 @@ export const CONNECT_ERROR_CODES = [
   'SERVICE_POINT_NOT_MAPPED',
   'INVALID_SERVICE_POINT',
   'NOT_FOUND',
+  'AWAITING_CLEARANCE',
+  'ENTRY_IN_OTHER_SERVICE',
+  // POST /entries/serving/link
+  'NO_SERVING_ENTRY',
   // Desk launch
   'ORIGIN_NOT_ALLOWED',
   'STAFF_INACTIVE',
@@ -39,6 +43,8 @@ export interface ConnectErrorBody {
   entry?: Entry;
   /** INVALID_TRANSITION: the entry's current status. */
   status?: EntryStatus;
+  /** ENTRY_IN_OTHER_SERVICE: the Klargy service id the visit's open entry is in. */
+  service?: string;
   /** 403 when the organisation's plan lacks EMR connections: "emrIntegration". */
   feature?: string;
   [extra: string]: unknown;

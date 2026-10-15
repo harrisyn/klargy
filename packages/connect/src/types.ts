@@ -153,6 +153,26 @@ export interface Entry {
   /** 1 = next, while WAITING; null otherwise. */
   position: number | null;
   refs: EntryRefs;
+  /** On hold: stepped out of the room, keeps its place; `status` is WAITING. */
+  held: boolean;
+  /** Waiting for payment in a service that requires clearance; `status` is WAITING, `position` null. */
+  awaitingClearance: boolean;
+  /** For an entry made by a transfer: who sent it. null for a first ticket or an automatic flow. */
+  sentBy: EntrySentBy | null;
+  /** The visit's entries, oldest first, this one included. */
+  journey: JourneyStep[];
+}
+
+export type EntrySentBy = 'staff' | 'patient' | 'integration';
+
+/** One stop of the visit. `service.ref` is the EMR's id for the service, else null. */
+export interface JourneyStep {
+  entryId: string;
+  ticketNumber: string;
+  service: { id: string; ref: string | null; name: string };
+  status: EntryStatus;
+  joinedAt: string;
+  endedAt: string | null;
 }
 
 export interface CreateEntryInput {
@@ -169,10 +189,12 @@ export interface CreateEntryInput {
   /** 0 to 100, higher is called first. */
   priority?: number;
   notes?: string | null;
+  /** Payment already settled: skips the service's payment gate (and clears an open entry on a 200). */
+  cleared?: boolean;
 }
 
 export type EntryRefType = 'visit' | 'encounter' | 'entry';
-export type EntryStatusAction = 'call' | 'complete' | 'cancel' | 'no-show';
+export type EntryStatusAction = 'call' | 'complete' | 'cancel' | 'no-show' | 'hold' | 'resume' | 'clear';
 export type EntryAction = EntryStatusAction | 'transfer' | 'priority';
 
 export interface EntryActionInput {
@@ -180,9 +202,12 @@ export interface EntryActionInput {
   service?: string;
   /** Links the entry to this EMR encounter. */
   encounter?: string;
-  /** `call` only: EMR or Klargy service point id. */
+  /** `call` and `resume`: EMR or Klargy service point id. */
   servicePoint?: string;
-  /** EMR practitioner id of whoever is acting. */
+  /**
+   * EMR practitioner id of whoever is acting. For `call` and `resume` with no
+   * `servicePoint`, the call goes to the room this staff member is signed in to.
+   */
   staff?: string;
   reason?: string;
 }
@@ -190,6 +215,8 @@ export interface EntryActionInput {
 export interface TransferInput {
   /** EMR or Klargy service id to send the patient to. */
   to: string;
+  /** Payment already settled: skips the target service's payment gate. */
+  cleared?: boolean;
   service?: string;
   priority?: number;
   encounter?: string;
@@ -327,4 +354,13 @@ export interface ServiceStatusResult {
   service: NamedRef;
   location: NamedRef;
   refs: { service: string | null; location: string | null };
+}
+
+/** `POST /entries/serving/link`. */
+export interface ServingLinkInput {
+  /** EMR practitioner id of the receptionist serving the walk-in. */
+  staff: string;
+  refs: { patient: string; visit: string; encounter?: string | null };
+  /** Updates the Klargy patient's details. */
+  patient?: PatientInput | null;
 }

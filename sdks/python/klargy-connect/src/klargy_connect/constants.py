@@ -24,8 +24,8 @@ SCOPES = (
 REF_TYPES = ("visit", "encounter", "entry")
 """How a by-ref call names an entry: the EMR visit, the EMR encounter, or a Klargy entry id."""
 
-STATUS_ACTIONS = ("call", "complete", "cancel", "no-show")
-"""By-ref actions that only change an entry's status."""
+STATUS_ACTIONS = ("call", "complete", "cancel", "no-show", "hold", "resume", "clear")
+"""By-ref actions that only change an entry's status (hold, resume and clear: the patient journey)."""
 
 ENTRY_ACTIONS = STATUS_ACTIONS + ("transfer", "priority")
 """Every `POST /entries/by-ref/{type}/{id}/{action}` action."""
@@ -64,6 +64,9 @@ WEBHOOK_EVENTS = (
     "entry.no_show",
     "entry.transferred",
     "entry.priority_changed",
+    "entry.held",
+    "entry.resumed",
+    "entry.cleared",
     "queue.paused",
     "queue.resumed",
     "appointment.created",
@@ -81,6 +84,9 @@ LOOKUP_EVENT = "patient.lookup"
 """`X-Webhook-Event` of Klargy's patient lookup call."""
 
 ORIGIN_TYPES = ("staff", "public", "integration", "system")
+
+SENT_BY = ("staff", "patient", "integration")
+"""An entry's `sentBy` when a transfer made it (else null)."""
 
 SIGNATURE_TOLERANCE_SECONDS = 300
 """Reject a timestamp more than 5 minutes from the receiver's clock."""

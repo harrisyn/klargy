@@ -85,6 +85,8 @@ await klargy.transferEntry('visit', 'VIS-456', { to: 'LOC-1:lab', reason: 'Lab o
 | `putPatient(patientId, patient)` | `PUT /patients/{patientId}` | yes |
 | `createEntry(input, { idempotencyKey? })` | `POST /entries` | with a key |
 | `callEntry` / `completeEntry` / `cancelEntry` / `noShowEntry(type, id, input?, opts?)` | `POST /entries/by-ref/{type}/{id}/{action}` | with a key |
+| `holdEntry` / `resumeEntry` / `clearEntry(type, id, input?, opts?)` | `POST …/hold`, `…/resume`, `…/clear` | with a key |
+| `linkServingEntry({ staff, refs, patient? }, opts?)` | `POST /entries/serving/link` | with a key |
 | `transferEntry(type, id, { to, … }, opts?)` | `POST …/transfer` | with a key |
 | `setEntryPriority(type, id, { priority, … }, opts?)` | `POST …/priority` | with a key |
 | `getEntryByRef(type, id, { service? })` | `GET /entries/by-ref/{type}/{id}` | yes |
