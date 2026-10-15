@@ -203,13 +203,13 @@ Klargy (branch `claude/project-thread-mj02be`):
 
 Serenity (to be filled in by the Serenity changes):
 
-- **S1:** _pending_
-- **S2:** _pending_
-- **S3:** _pending_
-- **S4:** _pending_
-- **S5:** _pending_
-- **S6:** _pending_
-- **S7:** _pending_
-- **S8:** _pending_
-- **S9:** _pending_
-- **S10:** _pending_
+- **S1:** Queue tasks run on their own `queue-management` Celery queue with a dedicated worker; the worker checks at start-up that they are registered; every run is recorded with its outcome, and organisation admins are alerted after 5 failures in a row. "Send to…", call, hold and resume return a `job_id` with `GET /v2/queue-management/jobs/{id}`.
+- **S2:** A `reconcile-queue-entries` beat task (every 5 minutes) walks `GET /entries` from a stored cursor and applies the webhook handlers, deduplicated.
+- **S3:** Registration stores the embed origins it sends (including the origin that clicked Register); the setup tab has an embed-origins field and shows what is registered.
+- **S4:** Webhook and lookup URLs come from a new `PUBLIC_API_URL` setting (falls back to `SERVER_HOST`), admins can override it, and the setup tab shows the registered URLs and time.
+- **S5:** The called-patient notice uses the app's toast helper, with a unit test.
+- **S6:** Only active clinics at live locations and active practitioners are published; clinics sharing a name get the location added.
+- **S7:** Plugin description and version updated (1.6.0) by an idempotent migration.
+- **S8:** Setup shows "Registered with Klargy" and "Registered by this organisation" separately and refreshes after Register.
+- **S9:** Every delivery is recorded as processed or ignored with a reason; echoes of Serenity's own actions are ignored; `ticket_stored: false` now says why.
+- **S10:** Send to shows a success or failure toast from the job outcome.
