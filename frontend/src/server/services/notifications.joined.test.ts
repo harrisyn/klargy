@@ -41,3 +41,20 @@ describe('QUEUE_JOINED', () => {
     expect(db.notification.create).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('QUEUE_DELAYED', () => {
+  it('uses our wording, or the standard one', () => {
+    expect(buildMessage('QUEUE_DELAYED', { ticket: 'L004', service: 'Laboratory', text: 'Back at 2pm.' }).message).toBe('Back at 2pm.');
+    expect(buildMessage('QUEUE_DELAYED', { ticket: 'L004', service: 'Laboratory' }).message).toBe(
+      "Laboratory is paused for now. Please stay nearby; we'll let you know when it reopens."
+    );
+  });
+
+  it('counts only messages sent since this pause as repeats', async () => {
+    db.notification.findFirst.mockResolvedValue({ id: 'old' });
+    const since = new Date('2026-10-16T10:00:00Z');
+    await notifyEntry('e1', 'QUEUE_DELAYED', { since });
+    expect(db.notification.findFirst.mock.calls[0][0].where).toEqual({ queueEntryId: 'e1', type: 'QUEUE_DELAYED', sentAt: { gte: since } });
+    expect(db.queueEntry.findUnique).not.toHaveBeenCalled();
+  });
+});

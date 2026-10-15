@@ -1,5 +1,5 @@
 /* ========================================
-   BetaPosition - Queue Management System
+   Klargy - Queue Management System
    Modern Design System & Global Styles
    ======================================== */
 
@@ -1856,3 +1856,25 @@ input::placeholder {
 }
 .upgrade-note a { font-weight: 600; color: #6b4300; text-decoration: underline; text-underline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* ========================================
+   Brand logo (components/brand/BrandLogo.tsx)
+   Sized by --brand-h so the SVGs stay sharp at any size; the lockup gives
+   way to the mark alone on narrow screens.
+   ======================================== */
+
+.brand-logo { display: inline-flex; align-items: center; gap: 0.625rem; line-height: 1; flex-shrink: 0; }
+.brand-logo img { display: block; height: var(--brand-h, 32px); max-width: none; }
+.brand-logo .brand-logo-full { width: auto; }
+.brand-logo .brand-logo-mark,
+.brand-logo .brand-logo-mark-only { width: var(--brand-h, 32px); }
+.brand-logo .brand-logo-mark { display: none; }
+.brand-logo-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) {
+  .brand-logo-compact-900 .brand-logo-full { display: none; }
+  .brand-logo-compact-900 .brand-logo-mark { display: block; }
+}
+@media (max-width: 480px) {
+  .brand-logo-compact-480 .brand-logo-full { display: none; }
+  .brand-logo-compact-480 .brand-logo-mark { display: block; }
+}

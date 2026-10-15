@@ -26,6 +26,7 @@ const STATUS: Record<Appointment['status'], { label: string; tone: BadgeTone }> 
   CHECKED_IN: { label: 'Checked in', tone: 'success' },
   COMPLETED: { label: 'Completed', tone: 'neutral' },
   CANCELLED: { label: 'Cancelled', tone: 'error' },
+  NO_SHOW: { label: 'No-show', tone: 'warning' },
 };
 
 const isActive = (a: Appointment) => a.status === 'SCHEDULED' || a.status === 'CONFIRMED';
@@ -244,7 +245,7 @@ function RescheduleModal({ appointment, onClose, onDone }: {
 
   useEffect(() => {
     if (!appointment) return;
-    const d = new Date(appointment.slot.startTime);
+    const d = new Date(appointment.startTime);
     setDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     setSlotId('');
     setError('');
@@ -280,10 +281,10 @@ function RescheduleModal({ appointment, onClose, onDone }: {
       <div className="stack">
         {error && <div className="inline-alert inline-alert-error" role="alert">{error}</div>}
         <p className="muted" style={{ margin: 0 }}>
-          Currently {appointment.service.name}, {new Date(appointment.slot.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.
+          Currently {appointment.service.name}, {new Date(appointment.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.
         </p>
         <Input label="New date" type="date" min={todayISO()} value={date} onChange={(e) => { setDate(e.target.value); setSlotId(''); }} />
-        <SlotPicker serviceId={appointment.serviceId} date={date} value={slotId} onChange={setSlotId} excludeSlotId={appointment.slot.id} />
+        <SlotPicker serviceId={appointment.serviceId} date={date} value={slotId} onChange={setSlotId} excludeSlotId={appointment.slot?.id} />
       </div>
     </Modal>
   );
@@ -351,7 +352,7 @@ export default function AppointmentsPage() {
   };
 
   const cancel = async (a: Appointment) => {
-    if (!window.confirm(`Cancel ${a.user.firstName} ${a.user.lastName}'s appointment at ${formatTime(a.slot.startTime)}?`)) return;
+    if (!window.confirm(`Cancel ${a.user.firstName} ${a.user.lastName}'s appointment at ${formatTime(a.startTime)}?`)) return;
     setBusyId(a.id);
     try {
       replace(await api.cancelAppointment(a.id));
@@ -420,7 +421,7 @@ export default function AppointmentsPage() {
               <tbody>
                 {visible.map((a) => (
                   <tr key={a.id}>
-                    <td className="cell-strong" style={{ whiteSpace: 'nowrap' }}>{formatTime(a.slot.startTime)}</td>
+                    <td className="cell-strong" style={{ whiteSpace: 'nowrap' }}>{formatTime(a.startTime)}</td>
                     <td>
                       <div className="cell-strong">{a.user.firstName} {a.user.lastName}</div>
                       {a.user.phone && <div className="muted">{a.user.phone}</div>}
@@ -458,7 +459,7 @@ export default function AppointmentsPage() {
         defaults={{ locationId, date: date < todayISO() ? todayISO() : date }}
         onBooked={(a) => {
           setBooking(false);
-          setNotice({ tone: 'success', text: `Booked ${a.user.firstName} ${a.user.lastName} for ${new Date(a.slot.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.` });
+          setNotice({ tone: 'success', text: `Booked ${a.user.firstName} ${a.user.lastName} for ${new Date(a.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.` });
           load();
         }}
       />
@@ -467,7 +468,7 @@ export default function AppointmentsPage() {
         onClose={() => setRescheduling(null)}
         onDone={(a) => {
           setRescheduling(null);
-          setNotice({ tone: 'success', text: `Moved to ${new Date(a.slot.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.` });
+          setNotice({ tone: 'success', text: `Moved to ${new Date(a.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.` });
           load();
         }}
       />

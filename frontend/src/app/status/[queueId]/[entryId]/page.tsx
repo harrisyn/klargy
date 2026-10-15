@@ -15,6 +15,8 @@ interface QueueStatus {
   locationName: string;
   locationAddress: string | null;
   status: 'WAITING' | 'SERVING' | 'SERVED' | 'CANCELLED' | 'NO_SHOW';
+  /** Today's queue: PAUSED while staff (or the EMR) have paused it. */
+  queueStatus?: 'ACTIVE' | 'PAUSED' | 'CLOSED';
   currentlyServing: string | null;
   totalInQueue: number;
   waitingCount: number;
@@ -431,6 +433,13 @@ export default function QueueStatusPage({
               <span>{getStatusText(status.status)}</span>
             </div>
           </div>
+
+          {/* Paused banner */}
+          {status.status === 'WAITING' && status.queueStatus === 'PAUSED' && (
+            <div role="status" style={pausedBanner}>
+              {status.serviceName} is paused for now. You keep your place in line. Please stay nearby; we&apos;ll let you know when it reopens.
+            </div>
+          )}
 
           {/* Position Display */}
           {status.status === 'WAITING' && status.position !== null && (
@@ -998,6 +1007,18 @@ const userName: React.CSSProperties = {
   fontSize: '0.875rem',
   color: '#6b7280',
   marginTop: '0.25rem',
+};
+
+const pausedBanner: React.CSSProperties = {
+  margin: '0 0 16px',
+  padding: '12px 16px',
+  borderRadius: '12px',
+  background: '#fffbeb',
+  border: '1px solid #fde68a',
+  color: '#92400e',
+  fontSize: '14px',
+  lineHeight: 1.5,
+  textAlign: 'center',
 };
 
 const statusBadgeContainer: React.CSSProperties = {

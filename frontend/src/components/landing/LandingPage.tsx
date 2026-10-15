@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Check } from 'lucide-react';
 import LobbyScene from './LobbyScene';
 import styles from './landing.module.css';
-import { BrandMark } from '@/components/Layout';
+import { BrandLogo } from '@/components/brand/BrandLogo';
 import { APP_NAME } from '@/lib/appConfig';
 
 const STEPS = [
@@ -37,9 +37,8 @@ export default function LandingPage() {
   return (
     <div className={styles.page}>
       <header className={`${styles.nav} ${scrolled ? styles.navScrolled : ''}`}>
-        <Link href="/" className={styles.brand}>
-          <BrandMark size={30} />
-          {APP_NAME}
+        <Link href="/" className={styles.brand} aria-label={`${APP_NAME} home`}>
+          <BrandLogo height={36} compactBelow={480} />
         </Link>
         <nav className={styles.navLinks} aria-label="Site">
           <a href="#how-it-works" className={`${styles.navLink} ${styles.navHideSm}`}>How it works</a>

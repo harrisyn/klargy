@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { BrandMark } from '@/components/Layout';
+import { BrandLogo, BrandMark } from '@/components/brand/BrandLogo';
 import { APP_NAME } from '@/lib/appConfig';
 
 interface AuthLayoutProps {
@@ -35,14 +35,20 @@ export default function AuthLayout({ orgName, logoUrl, accentColor, panelTitle, 
   return (
     <div className="authx" style={accentColor ? ({ ['--authx-accent' as string]: accentColor } as React.CSSProperties) : undefined}>
       <aside className="authx-panel">
-        <Link href="/" className="authx-brand">
-          {logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={logoUrl} alt="" className="authx-logo" />
+        <Link href="/" className="authx-brand" aria-label={orgName ? undefined : `${APP_NAME} home`}>
+          {orgName || logoUrl ? (
+            <>
+              {logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoUrl} alt="" className="authx-logo" />
+              ) : (
+                <BrandMark size={32} />
+              )}
+              <span>{orgName || APP_NAME}</span>
+            </>
           ) : (
-            <BrandMark size={32} />
+            <BrandLogo height={36} surface="dark" />
           )}
-          <span>{orgName || APP_NAME}</span>
         </Link>
         <div className="authx-panel-body">
           <p className="authx-panel-title">{panelTitle ?? hello}</p>

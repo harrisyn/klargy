@@ -4,6 +4,7 @@ import { authenticateIntegration, requireScope } from '../middleware/integration
 import { getMe, registerIntegration, putCatalog, getCatalog, getMappings } from '../controllers/connect.controller';
 import { putPatient, postEntry, postEntryByRef, getEntryByRef, listEntries } from '../controllers/connectQueue.controller';
 import { launchDesk } from '../controllers/connectDesk.controller';
+import { putAppointment, getAnalytics, postServiceStatus } from '../controllers/connectJourney.controller';
 
 // Klargy Connect v1 (docs/connect/v1.md): called by other systems with an
 // integration API key, never by staff with a JWT.
@@ -24,5 +25,10 @@ router.get('/entries/by-ref/:type/:id', requireScope('entries:read'), getEntryBy
 router.post('/entries/by-ref/:type/:id/:action', requireScope('entries:write'), postEntryByRef);
 
 router.post('/desk/launch', requireScope('desk:launch'), launchDesk);
+
+// Phase 5: journey automation
+router.put('/appointments/:appointmentRef', requireScope('appointments:write'), putAppointment);
+router.get('/analytics', requireScope('analytics:read'), getAnalytics);
+router.post('/services/:service/status', requireScope('entries:write'), postServiceStatus);
 
 export default router;

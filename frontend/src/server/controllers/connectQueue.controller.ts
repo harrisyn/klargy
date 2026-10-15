@@ -7,13 +7,24 @@ import { buildRefs, klargyIdFor, linkRef } from '../services/externalRefs.servic
 import {
   ENTRY_SNAPSHOT_INCLUDE,
   ORIGIN,
+  TransferError,
+  recordQueueEvent,
+  transferEntryToService,
   entryRefSubject,
   getOrCreateQueueForDate,
   toEntrySnapshot,
   withPositions,
 } from '../services/queueEvents.service';
 import { notifyEntry } from '../services/notifications.service';
-import { QueueActionError, callEntry, endEntry, joinQueueEntry, serveEntry } from '../services/queueActions.service';
+import {
+  QueueActionError,
+  callEntry,
+  checkEntryLimits,
+  endEntry,
+  joinQueueEntry,
+  serveEntry,
+  setEntryPriority,
+} from '../services/queueActions.service';
 
 // Klargy Connect v1, phase 2 (docs/connect/v1.md section 5): patients and
 // queue entries addressed by the other system's own ids. Every handler runs
@@ -256,7 +267,7 @@ function refString(refs: Record<string, unknown>, key: string, required: boolean
 
 /** A Klargy service in the caller's organisation, by mapped external id or
  * by Klargy id. */
-async function resolveService(integration: Caller, value: string) {
+export async function resolveService(integration: Caller, value: string) {
   const mapped = await klargyIdFor(integration.id, 'service', value);
   const service = await prisma.service.findFirst({
     where: { id: mapped ?? value, location: { organizationId: integration.organizationId } },
@@ -268,7 +279,7 @@ async function resolveService(integration: Caller, value: string) {
   return service;
 }
 
-const queueClosed = (message = 'Today’s queue for this service isn’t taking anyone right now') =>
+export const queueClosed = (message = 'Today’s queue for this service isn’t taking anyone right now') =>
   new ConnectError(message, 409, 'QUEUE_CLOSED');
 
 async function journeyForVisit(integration: Caller, visitId: string) {
@@ -304,6 +315,29 @@ async function linkVisit(integration: Caller, visitId: string, entryId: string) 
   }
 }
 
+/** A ticket issued for a known appointment checks the appointment in
+ * (phase 5). An unknown or already closed appointment is ignored. */
+async function checkInAppointment(integration: Caller, appointmentRef: string, entryId: string) {
+  const appointmentId = await klargyIdFor(integration.id, 'appointment', appointmentRef);
+  if (!appointmentId) return;
+  const appointment = await prisma.appointment.findFirst({
+    where: { id: appointmentId, service: { location: { organizationId: integration.organizationId } } },
+    select: { id: true, userId: true },
+  });
+  if (!appointment) return;
+  const { count } = await prisma.appointment.updateMany({
+    where: { id: appointment.id, status: { in: ['SCHEDULED', 'CONFIRMED'] } },
+    data: { status: 'CHECKED_IN' },
+  });
+  if (count !== 1) return;
+  await recordQueueEvent({
+    action: 'appointment.checked_in',
+    origin: originOf(integration),
+    entryId,
+    data: { appointmentId: appointment.id, patientId: appointment.userId },
+  });
+}
+
 async function createEntry(req: Request): Promise<Result> {
   const integration = caller(req);
   const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
@@ -311,6 +345,7 @@ async function createEntry(req: Request): Promise<Result> {
   const patientRef = refString(refs, 'patient', true)!;
   const visitRef = refString(refs, 'visit', true)!;
   const encounterRef = refString(refs, 'encounter', false);
+  const appointmentRef = refString(refs, 'appointment', false);
   const serviceRef = text(body.service, 'service')!;
   const patientInput = body.patient === undefined || body.patient === null ? undefined : parsePatient(body.patient);
   const priority = body.priority === undefined || body.priority === null ? 0 : body.priority;
@@ -332,6 +367,7 @@ async function createEntry(req: Request): Promise<Result> {
     });
     if (open) {
       if (encounterRef) await linkRef(integration, 'encounter', open.id, encounterRef);
+      if (appointmentRef) await checkInAppointment(integration, appointmentRef, open.id);
       return { status: 200, body: { entry: await entryView(integration.id, open.id) } };
     }
   }
@@ -360,6 +396,7 @@ async function createEntry(req: Request): Promise<Result> {
     );
     // The patient hears they're in, exactly as when they join themselves.
     await notifyEntry(entry.id, 'QUEUE_JOINED').catch((e) => console.error('join notification failed:', e));
+    if (appointmentRef) await checkInAppointment(integration, appointmentRef, entry.id);
     return { status: 201, body: { entry: await entryView(integration.id, entry.id) } };
   } catch (error) {
     if (!(error instanceof QueueActionError)) throw error;
@@ -401,7 +438,11 @@ const ACTIONS = {
   'no-show': { status: 'NO_SHOW', from: ['WAITING', 'SERVING'] },
 } as const;
 type ActionName = keyof typeof ACTIONS;
+/** Phase 5 actions that don't just set a status. */
+const OTHER_ACTIONS = ['transfer', 'priority'] as const;
+const ACTION_NAMES = [...Object.keys(ACTIONS), ...OTHER_ACTIONS];
 const REF_TYPES = ['visit', 'encounter', 'entry'] as const;
+type RefType = (typeof REF_TYPES)[number];
 
 const entryNotFound = () => new ConnectError('No such entry', 404, 'ENTRY_NOT_FOUND');
 
@@ -413,8 +454,8 @@ async function entryInOrg(integration: Caller, entryId: string) {
 }
 
 /** The entry a by-ref call addresses. For a visit: the entry being served,
- * else the one waiting longest. */
-async function resolveEntry(integration: Caller, type: (typeof REF_TYPES)[number], id: string) {
+ * else the one waiting longest, among `serviceId`'s entries when given. */
+async function resolveEntry(integration: Caller, type: RefType, id: string, serviceId?: string | null) {
   if (type !== 'visit') {
     const entryId = type === 'entry' ? id : await klargyIdFor(integration.id, 'encounter', id);
     const entry = entryId ? await entryInOrg(integration, entryId) : null;
@@ -424,15 +465,32 @@ async function resolveEntry(integration: Caller, type: (typeof REF_TYPES)[number
   const journey = await journeyForVisit(integration, id);
   const open = journey
     ? await prisma.queueEntry.findMany({
-        where: { id: { in: journey.queueEntryIds }, status: { in: [...OPEN] } },
+        where: {
+          id: { in: journey.queueEntryIds },
+          status: { in: [...OPEN] },
+          ...(serviceId ? { queue: { serviceId } } : {}),
+        },
         orderBy: { joinedAt: 'asc' },
         select: { id: true },
       })
     : [];
   const rows = await Promise.all(open.map((o) => entryInOrg(integration, o.id)));
   const entry = rows.find((e) => e?.status === 'SERVING') ?? rows.find((e) => e?.status === 'WAITING');
-  if (!entry) throw new ConnectError('That visit has no waiting or serving entry', 404, 'NO_OPEN_ENTRY');
+  if (!entry) {
+    throw new ConnectError(
+      serviceId ? 'That visit has no waiting or serving entry for that service' : 'That visit has no waiting or serving entry',
+      404,
+      'NO_OPEN_ENTRY'
+    );
+  }
   return entry;
+}
+
+/** The optional `service` that narrows a visit's by-ref call to one
+ * service's entries (phase 5): an EMR or Klargy service id. */
+async function serviceSelector(integration: Caller, value: unknown, field = 'service') {
+  const ref = text(value, field, false);
+  return ref ? (await resolveService(integration, ref)).id : null;
 }
 
 /** The desk (service point instance) to call to: the named service point's
@@ -467,19 +525,160 @@ async function staffUserFor(integration: Caller, value: string | undefined): Pro
   return user?.id ?? null;
 }
 
+function priorityValue(value: unknown, required: boolean): number | undefined {
+  if (value === undefined || value === null) {
+    if (required) throw badRequest('priority is required');
+    return undefined;
+  }
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 100) {
+    throw badRequest('priority must be a whole number from 0 to 100');
+  }
+  return value as number;
+}
+
+function refusal(error: QueueActionError): never {
+  if (error.code === 'NOT_WAITING' || error.code === 'INVALID_TRANSITION') {
+    throw new ConnectError('The entry changed status before this could be applied', 409, 'INVALID_TRANSITION');
+  }
+  if (error.code === 'INVALID_SERVICE_POINT') throw new ConnectError(error.message, 422, 'INVALID_SERVICE_POINT');
+  if (error.code === 'LIMIT_REACHED') {
+    const { message, limitType, current, limit } = error.body;
+    throw new ConnectError(String(message), 403, 'LIMIT_REACHED', { limitType, current, limit });
+  }
+  throw new ConnectError(error.message, error.status, error.code);
+}
+
+/** POST …/transfer (phase 5): completes the entry and issues a ticket for
+ * `to` in the same visit. */
+async function transferByRef(integration: Caller, type: RefType, id: string, body: Record<string, unknown>): Promise<Result> {
+  const toRef = text(body.to, 'to')!;
+  const priority = priorityValue(body.priority, false);
+  const encounterRef = text(body.encounter, 'encounter', false);
+  const staffRef = text(body.staff, 'staff', false);
+  const reason = text(body.reason, 'reason', false);
+  const fromServiceId = await serviceSelector(integration, body.service);
+  const target = await resolveService(integration, toRef);
+
+  // Already there: the visit's open entry in `to` is the answer, so retries
+  // (and a second automation run) change nothing.
+  let journeyId: string | null | undefined;
+  if (type === 'visit') {
+    journeyId = (await journeyForVisit(integration, id))?.id;
+  } else {
+    const entryId = type === 'entry' ? id : await klargyIdFor(integration.id, 'encounter', id);
+    journeyId = entryId
+      ? (await prisma.queueEntry.findUnique({ where: { id: entryId }, select: { journeyId: true } }))?.journeyId
+      : null;
+  }
+  if (journeyId) {
+    const journey = await prisma.customerJourney.findUnique({ where: { id: journeyId }, select: { queueEntryIds: true } });
+    const there = journey
+      ? await prisma.queueEntry.findFirst({
+          where: { id: { in: journey.queueEntryIds }, status: { in: [...OPEN] }, queue: { serviceId: target.id } },
+          orderBy: { joinedAt: 'asc' },
+          select: { id: true },
+        })
+      : null;
+    if (there) {
+      if (encounterRef) await linkRef(integration, 'encounter', there.id, encounterRef);
+      return { status: 200, body: { entry: await entryView(integration.id, there.id), from: null } };
+    }
+  }
+
+  const source = await resolveEntry(integration, type, id, fromServiceId);
+  if (!(OPEN as readonly string[]).includes(source.status)) {
+    throw new ConnectError(`An entry that is ${source.status} can’t be transferred`, 409, 'INVALID_TRANSITION', {
+      status: source.status,
+    });
+  }
+
+  if (target.location.organization.status === 'PAUSED' || !target.isActive) throw queueClosed();
+  const today = await getOrCreateQueueForDate(target.id);
+  if (!today || today.queue.status !== 'ACTIVE') throw queueClosed();
+
+  const patient = await prisma.queueEntry.findUnique({ where: { id: source.id }, select: { userId: true } });
+  const elsewhere = patient
+    ? await prisma.queueEntry.findFirst({
+        where: { queueId: today.queue.id, userId: patient.userId, status: { in: [...OPEN] } },
+        select: { id: true },
+      })
+    : null;
+  if (elsewhere) {
+    throw new ConnectError('This patient already has an open ticket in that queue for another visit', 409, 'ALREADY_IN_QUEUE', {
+      entry: await entryView(integration.id, elsewhere.id),
+    });
+  }
+
+  const actorUserId = await staffUserFor(integration, staffRef);
+  let newEntryId: string;
+  try {
+    await checkEntryLimits(integration.organizationId);
+    const { entry } = await transferEntryToService(source.id, target.id, {
+      actorUserId,
+      priority,
+      completeSource: true,
+      requireOpenSource: true,
+      origin: originOf(integration),
+      data: reason ? { reason } : undefined,
+    });
+    newEntryId = entry.id;
+  } catch (error) {
+    if (error instanceof QueueActionError) refusal(error);
+    if (!(error instanceof TransferError)) throw error;
+    if (error.code === 'QUEUE_CLOSED') throw queueClosed();
+    if (error.code === 'INVALID_TRANSITION') throw new ConnectError(error.message, 409, 'INVALID_TRANSITION');
+    throw new ConnectError(error.message, error.status, error.code);
+  }
+  if (encounterRef) await linkRef(integration, 'encounter', newEntryId, encounterRef);
+  // The patient hears about the new ticket, as when they first joined.
+  await notifyEntry(newEntryId, 'QUEUE_JOINED').catch((e) => console.error('join notification failed:', e));
+  const [entry, from] = await entryViews(integration.id, [newEntryId, source.id]);
+  return { status: 201, body: { entry, from } };
+}
+
+/** POST …/priority (phase 5). */
+async function priorityByRef(integration: Caller, type: RefType, id: string, body: Record<string, unknown>): Promise<Result> {
+  const priority = priorityValue(body.priority, true)!;
+  const encounterRef = text(body.encounter, 'encounter', false);
+  const staffRef = text(body.staff, 'staff', false);
+  const reason = text(body.reason, 'reason', false);
+  const entry = await resolveEntry(integration, type, id, await serviceSelector(integration, body.service));
+  if (encounterRef) await linkRef(integration, 'encounter', entry.id, encounterRef);
+  if (!(OPEN as readonly string[]).includes(entry.status)) {
+    throw new ConnectError(`The priority of an entry that is ${entry.status} can’t be changed`, 409, 'INVALID_TRANSITION', {
+      status: entry.status,
+    });
+  }
+  try {
+    await setEntryPriority(entry.id, priority, {
+      actorUserId: await staffUserFor(integration, staffRef),
+      origin: originOf(integration),
+      data: reason ? { reason } : undefined,
+    });
+  } catch (error) {
+    if (error instanceof QueueActionError) refusal(error);
+    throw error;
+  }
+  return { status: 200, body: { entry: await entryView(integration.id, entry.id) } };
+}
+
 async function moveEntry(req: Request): Promise<Result> {
   const integration = caller(req);
   const { type, id, action } = req.params;
-  if (!REF_TYPES.includes(type as (typeof REF_TYPES)[number])) throw badRequest(`type must be one of: ${REF_TYPES.join(', ')}`);
-  if (!(action in ACTIONS)) throw badRequest(`action must be one of: ${Object.keys(ACTIONS).join(', ')}`);
-  const step = ACTIONS[action as ActionName];
+  if (!REF_TYPES.includes(type as RefType)) throw badRequest(`type must be one of: ${REF_TYPES.join(', ')}`);
+  if (!ACTION_NAMES.includes(action)) throw badRequest(`action must be one of: ${ACTION_NAMES.join(', ')}`);
   const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+  const ref = text(id, 'id')!;
+  if (action === 'transfer') return transferByRef(integration, type as RefType, ref, body);
+  if (action === 'priority') return priorityByRef(integration, type as RefType, ref, body);
+
+  const step = ACTIONS[action as ActionName];
   const encounterRef = text(body.encounter, 'encounter', false);
   const servicePointRef = text(body.servicePoint, 'servicePoint', false);
   const staffRef = text(body.staff, 'staff', false);
   const reason = text(body.reason, 'reason', false);
 
-  const entry = await resolveEntry(integration, type as (typeof REF_TYPES)[number], text(id, 'id')!);
+  const entry = await resolveEntry(integration, type as RefType, ref, await serviceSelector(integration, body.service));
   if (encounterRef) await linkRef(integration, 'encounter', entry.id, encounterRef);
 
   // Already there: nothing to do, so retries are safe.
@@ -506,11 +705,7 @@ async function moveEntry(req: Request): Promise<Result> {
     }
   } catch (error) {
     if (!(error instanceof QueueActionError)) throw error;
-    if (error.code === 'NOT_WAITING' || error.code === 'INVALID_TRANSITION') {
-      throw new ConnectError('The entry changed status before this could be applied', 409, 'INVALID_TRANSITION');
-    }
-    if (error.code === 'INVALID_SERVICE_POINT') throw new ConnectError(error.message, 422, 'INVALID_SERVICE_POINT');
-    throw new ConnectError(error.message, error.status, error.code);
+    refusal(error);
   }
   return { status: 200, body: { entry: await entryView(integration.id, entry.id) } };
 }
@@ -532,8 +727,8 @@ export const getEntryByRef = async (req: Request, res: Response, next: NextFunct
   try {
     const integration = caller(req);
     const { type, id } = req.params;
-    if (!REF_TYPES.includes(type as (typeof REF_TYPES)[number])) throw badRequest(`type must be one of: ${REF_TYPES.join(', ')}`);
-    const entry = await resolveEntry(integration, type as (typeof REF_TYPES)[number], text(id, 'id')!);
+    if (!REF_TYPES.includes(type as RefType)) throw badRequest(`type must be one of: ${REF_TYPES.join(', ')}`);
+    const entry = await resolveEntry(integration, type as RefType, text(id, 'id')!, await serviceSelector(integration, req.query.service));
     res.json({ entry: await entryView(integration.id, entry.id) });
   } catch (error) {
     handle(error, res, next);

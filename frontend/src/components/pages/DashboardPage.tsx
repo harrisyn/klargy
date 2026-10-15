@@ -136,8 +136,8 @@ export default function DashboardPage() {
   const served = metrics?.services.filter((s) => s.counts.served > 0) || [];
   const avgWait = served.length ? Math.round(served.reduce((n, s) => n + s.waitTime.average * s.counts.served, 0) / served.reduce((n, s) => n + s.counts.served, 0)) : 0;
   const upcoming = appointments
-    .filter((a) => a.status !== 'CANCELLED' && a.status !== 'COMPLETED')
-    .sort((x, y) => x.slot.startTime.localeCompare(y.slot.startTime));
+    .filter((a) => a.status !== 'CANCELLED' && a.status !== 'COMPLETED' && a.status !== 'NO_SHOW')
+    .sort((x, y) => x.startTime.localeCompare(y.startTime));
 
   if (locations && locations.length === 0) {
     return (
@@ -240,7 +240,7 @@ export default function DashboardPage() {
               <ul className="today-appts">
                 {upcoming.slice(0, 6).map((a) => (
                   <li key={a.id}>
-                    <time>{new Date(a.slot.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+                    <time>{new Date(a.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
                     <span>{a.user.firstName} {a.user.lastName}</span>
                     <small>{a.status === 'CHECKED_IN' ? 'Checked in' : a.service.name}</small>
                   </li>

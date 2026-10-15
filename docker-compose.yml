@@ -24,7 +24,7 @@ services:
       APP_URL: http://localhost:8003
       # Product name shown across the UI and in emails - the single place to
       # rebrand the app is APP_NAME in the repo-root .env.
-      APP_NAME: ${APP_NAME:-BetaPosition}
+      APP_NAME: ${APP_NAME:-Klargy}
       APP_DOMAIN: ${APP_DOMAIN:-localhost:8003}
       # SMTP -> Mailpit in this compose setup
       SMTP_HOST: ${SMTP_HOST:-mailpit}

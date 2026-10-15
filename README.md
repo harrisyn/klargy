@@ -1,6 +1,8 @@
-# Queue Management
+# Klargy
 
-Multi-tenant queue and appointment management for clinics and other service
+<img src="frontend/public/brand/klargy-logo.svg" alt="Klargy" height="48">
+
+Klargy is multi-tenant queue and appointment management for clinics and other service
 providers: walk-ins via QR/kiosk, booked appointments, multi-step patient
 journeys (reception → doctor → lab → pharmacy), live display boards, patient
 notifications, EMR webhooks, billing, and AI-assisted analytics.

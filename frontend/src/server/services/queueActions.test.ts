@@ -29,7 +29,7 @@ vi.mock('./queueEvents.service', () => ({
 
 import prisma from '../lib/prisma';
 import { recordQueueEvent, closeJourneyIfDone, transferEntryToService } from './queueEvents.service';
-import { serveEntry, endEntry, joinQueueEntry, QueueActionError } from './queueActions.service';
+import { serveEntry, endEntry, joinQueueEntry, setEntryPriority, QueueActionError } from './queueActions.service';
 
 const origin = { type: 'integration' as const, integrationId: 'int1' };
 
@@ -93,5 +93,31 @@ describe('joinQueueEntry', () => {
     const err = await joinQueueEntry('q1', { userId: 'u1' }).catch((e) => e);
     expect(err).toBeInstanceOf(QueueActionError);
     expect(err).toMatchObject({ status: 400, code: 'QUEUE_CLOSED', body: { error: 'Queue is not active' } });
+  });
+});
+
+describe('setEntryPriority', () => {
+  it('moves an open entry and announces entry.priority_changed with the old value', async () => {
+    (prisma.queueEntry.findUnique as any).mockResolvedValue({ id: 'e1', queueId: 'q1', status: 'WAITING', priority: 0 });
+    (prisma.queueEntry.updateMany as any).mockResolvedValue({ count: 1 });
+    (prisma.queue.findUnique as any).mockResolvedValue({ service: { locationId: 'l1' } });
+    expect(await setEntryPriority('e1', 70, { origin })).toEqual({ previousPriority: 0 });
+    expect((prisma.queueEntry.updateMany as any).mock.calls[0][0]).toEqual({
+      where: { id: 'e1', status: { in: ['WAITING', 'SERVING'] } },
+      data: { priority: 70 },
+    });
+    expect(recordQueueEvent).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'entry.priority_changed', entryId: 'e1', origin, data: { priority: 70, previousPriority: 0 },
+    }));
+  });
+
+  it('does nothing for the same value, and refuses an entry that is no longer open', async () => {
+    (prisma.queueEntry.findUnique as any).mockResolvedValue({ id: 'e1', queueId: 'q1', status: 'WAITING', priority: 70 });
+    expect(await setEntryPriority('e1', 70)).toEqual({ previousPriority: null });
+    expect(recordQueueEvent).not.toHaveBeenCalled();
+
+    (prisma.queueEntry.findUnique as any).mockResolvedValue({ id: 'e1', queueId: 'q1', status: 'SERVED', priority: 0 });
+    (prisma.queueEntry.updateMany as any).mockResolvedValue({ count: 0 });
+    await expect(setEntryPriority('e1', 50)).rejects.toBeInstanceOf(QueueActionError);
   });
 });

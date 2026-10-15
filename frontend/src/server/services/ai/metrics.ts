@@ -133,6 +133,25 @@ export async function periodSummary(scope: Scope, startDate?: unknown, endDate?:
   };
 }
 
+/** Overall and per-service counters for entries that joined between two
+ * exact instants (Klargy Connect analytics, where "today" is the
+ * location's day rather than the server's). */
+export async function summaryBetween(scope: Scope, from: Date, to: Date) {
+  const entries = await loadEntries(scope, from, to);
+  const byService = new Map<string, Entry[]>();
+  for (const e of entries) {
+    if (!byService.has(e.queue.serviceId)) byService.set(e.queue.serviceId, []);
+    byService.get(e.queue.serviceId)!.push(e);
+  }
+  return {
+    overall: summarize(entries),
+    perService: [...byService.entries()]
+      .map(([serviceId, list]) => ({ serviceId, service: list[0].queue.service.name, ...summarize(list) }))
+      .sort((a, b) => b.joined - a.joined),
+    truncated: entries.length >= MAX_ROWS,
+  };
+}
+
 export async function hourlyPattern(scope: Scope, days = 28) {
   const { start, end } = parseRange(undefined, undefined, Math.min(Math.max(days, 1), 90));
   const entries = await loadEntries(scope, start, end);
@@ -213,8 +232,10 @@ export async function transfers(scope: Scope, startDate?: unknown, endDate?: unk
   };
 }
 
-export async function liveStatus(scope: Scope) {
-  const today = getStartOfDay();
+/** Today's queues. `timeZone` makes "today" a location's day; without it
+ * the server's. */
+export async function liveStatus(scope: Scope, timeZone?: string) {
+  const today = getStartOfDay(new Date(), timeZone);
   const queues = await prisma.queue.findMany({
     where: {
       date: today,
@@ -255,7 +276,7 @@ export async function appointmentStats(scope: Scope, startDate?: unknown, endDat
   const rows = await prisma.appointment.groupBy({
     by: ['status'],
     where: {
-      slot: { startTime: { gte: start, lte: end } },
+      startTime: { gte: start, lte: end },
       service: {
         ...(scope.serviceId ? { id: scope.serviceId } : {}),
         location: { organizationId: scope.organizationId, ...(scope.locationId ? { id: scope.locationId } : {}) },
@@ -267,7 +288,7 @@ export async function appointmentStats(scope: Scope, startDate?: unknown, endDat
   const missed = await prisma.appointment.count({
     where: {
       status: { in: ['SCHEDULED', 'CONFIRMED'] },
-      slot: { startTime: { gte: start, lt: new Date(Math.min(end.getTime(), Date.now())) } },
+      startTime: { gte: start, lt: new Date(Math.min(end.getTime(), Date.now())) },
       service: { location: { organizationId: scope.organizationId, ...(scope.locationId ? { id: scope.locationId } : {}) } },
     },
   });

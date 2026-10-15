@@ -1,6 +1,7 @@
 // Single source of truth for the product's display name. Set APP_NAME in
 // the repo-root .env - docker-compose forwards it to this service as-is.
-export const APP_NAME = process.env.APP_NAME || 'BetaPosition';
+export const DEFAULT_APP_NAME = 'Klargy';
+export const APP_NAME = process.env.APP_NAME || DEFAULT_APP_NAME;
 
 // Public base URL of the web app (root domain, no tenant subdomain).
 export const APP_URL = (process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:8003').replace(/\/$/, '');

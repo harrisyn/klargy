@@ -25,6 +25,7 @@ vi.mock('../../lib/prisma', () => ({
     user: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     servicePoint: { findFirst: vi.fn() },
     servicePointService: { findFirst: vi.fn() },
+    appointment: { findFirst: vi.fn(), updateMany: vi.fn() },
   },
 }));
 
@@ -34,7 +35,15 @@ vi.mock('../../services/queueActions.service', async () => {
       super(String(body.message ?? body.error));
     }
   }
-  return { QueueActionError, joinQueueEntry: vi.fn(), callEntry: vi.fn(), serveEntry: vi.fn(), endEntry: vi.fn() };
+  return {
+    QueueActionError,
+    joinQueueEntry: vi.fn(),
+    callEntry: vi.fn(),
+    serveEntry: vi.fn(),
+    endEntry: vi.fn(),
+    checkEntryLimits: vi.fn(),
+    setEntryPriority: vi.fn(),
+  };
 });
 
 vi.mock('../../services/notifications.service', () => ({
@@ -46,11 +55,21 @@ vi.mock('../../services/notifications.service', () => ({
 vi.mock('../../services/queueEvents.service', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../services/queueEvents.service')>()),
   getOrCreateQueueForDate: vi.fn(),
+  transferEntryToService: vi.fn(),
+  recordQueueEvent: vi.fn(),
 }));
 
 import prisma from '../../lib/prisma';
-import { getOrCreateQueueForDate } from '../../services/queueEvents.service';
-import { QueueActionError, joinQueueEntry, callEntry, serveEntry, endEntry } from '../../services/queueActions.service';
+import { getOrCreateQueueForDate, transferEntryToService, recordQueueEvent, TransferError } from '../../services/queueEvents.service';
+import {
+  QueueActionError,
+  joinQueueEntry,
+  callEntry,
+  serveEntry,
+  endEntry,
+  checkEntryLimits,
+  setEntryPriority,
+} from '../../services/queueActions.service';
 import { notifyEntry } from '../../services/notifications.service';
 import { postEntry, postEntryByRef, getEntryByRef, listEntries, putPatient } from '../connectQueue.controller';
 
@@ -478,5 +497,171 @@ describe('PUT /patients/:patientId', () => {
     const res = makeRes();
     await putPatient(makeReq({ params: { patientId: 'P1' }, body: { firstName: 'Ama' } }), res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+});
+
+describe('phase 5: by-ref service selector, transfer and priority', () => {
+  const byRef = (type: string, id: string, action: string, b: Record<string, unknown> = {}) =>
+    makeReq({ params: { type, id, action }, body: b, path: `/entries/by-ref/${type}/${id}/${action}` });
+
+  // Visit V1 has e1 waiting in s1 (GP) and e2 being served in s2 (Lab).
+  beforeEach(() => {
+    refs.push(
+      { resourceType: 'visit', resourceId: 'j1', externalId: 'V1' },
+      { resourceType: 'service', resourceId: 's2', externalId: 'loc-1:lab' }
+    );
+    (prisma.service.findFirst as any).mockImplementation(async ({ where }: any) =>
+      where.id === 's1' || where.id === 's2' ? { ...service, id: where.id } : null
+    );
+    (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1', 'e2'] });
+    const svc: Record<string, string> = { e1: 's1', e2: 's2', e3: 's2' };
+    const st: Record<string, string> = { e1: 'WAITING', e2: 'SERVING', e3: 'WAITING' };
+    (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) => {
+      if (where.queueId) return [];
+      if (where.status?.in) {
+        return where.id.in.filter((id: string) => !where.queue || svc[id] === where.queue.serviceId).map((id: string) => ({ id }));
+      }
+      return where.id.in.map((id: string) => entryRow(id, st[id] ?? 'WAITING'));
+    });
+    (prisma.queueEntry.findFirst as any).mockImplementation(async ({ where }: any) =>
+      where.id && typeof where.id === 'string'
+        ? { id: where.id, status: st[where.id], queueId: 'q1', queue: { serviceId: svc[where.id] } }
+        : null
+    );
+    (prisma.queueEntry.findUnique as any).mockResolvedValue({ userId: 'u1', journeyId: 'j1' });
+    (transferEntryToService as any).mockResolvedValue({ entry: { id: 'e3' } });
+  });
+
+  it('narrows a visit’s by-ref action to one service’s entries', async () => {
+    const res = makeRes();
+    await postEntryByRef(byRef('visit', 'V1', 'call', { service: 'clinic-1' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(callEntry).toHaveBeenCalledWith('q1', { entryId: 'e1', servicePointInstanceId: null }, expect.anything());
+  });
+
+  it('answers 404 NO_OPEN_ENTRY when the chosen service has nothing open for the visit', async () => {
+    (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1'] });
+    const res = makeRes();
+    await postEntryByRef(byRef('visit', 'V1', 'complete', { service: 'loc-1:lab' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json.mock.calls[0][0].code).toBe('NO_OPEN_ENTRY');
+  });
+
+  it('accepts the selector on GET by-ref too', async () => {
+    const res = makeRes();
+    await getEntryByRef(makeReq({ method: 'GET', params: { type: 'visit', id: 'V1' }, query: { service: 'clinic-1' } }), res, vi.fn());
+    expect(res.json.mock.calls[0][0].entry.entryId).toBe('e1');
+  });
+
+  it('transfers the visit’s entry to another service and returns both entries', async () => {
+    (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1'] });
+    const res = makeRes();
+    await postEntryByRef(byRef('visit', 'V1', 'transfer', { to: 'loc-1:lab', priority: 50, reason: 'Lab orders' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(checkEntryLimits).toHaveBeenCalledWith('org1');
+    expect(transferEntryToService).toHaveBeenCalledWith('e1', 's2', expect.objectContaining({
+      priority: 50, completeSource: true, requireOpenSource: true, origin: ORIGIN, data: { reason: 'Lab orders' },
+    }));
+    expect(notifyEntry).toHaveBeenCalledWith('e3', 'QUEUE_JOINED');
+    const out = res.json.mock.calls[0][0];
+    expect(out.entry.entryId).toBe('e3');
+    expect(out.from.entryId).toBe('e1');
+  });
+
+  it('returns 200 and changes nothing when the visit already has an open entry in the target', async () => {
+    (prisma.queueEntry.findFirst as any).mockImplementation(async ({ where }: any) =>
+      where.queue?.serviceId === 's2' ? { id: 'e2' } : null
+    );
+    const res = makeRes();
+    await postEntryByRef(byRef('visit', 'V1', 'transfer', { to: 'loc-1:lab' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json.mock.calls[0][0]).toMatchObject({ entry: { entryId: 'e2' }, from: null });
+    expect(transferEntryToService).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unmapped target, a closed target queue, a finished source and the plan limit', async () => {
+    (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1'] });
+    let res = makeRes();
+    await postEntryByRef(byRef('visit', 'V1', 'transfer', { to: 'nope' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json.mock.calls[0][0].code).toBe('SERVICE_NOT_MAPPED');
+
+    res = makeRes();
+    await postEntryByRef(byRef('visit', 'V1', 'transfer', {}), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+
+    (getOrCreateQueueForDate as any).mockResolvedValueOnce({ queue: { id: 'q2', status: 'PAUSED' } });
+    res = makeRes();
+    await postEntryByRef(byRef('visit', 'V1', 'transfer', { to: 'loc-1:lab' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].code).toBe('QUEUE_CLOSED');
+
+    (prisma.queueEntry.findFirst as any).mockImplementation(async ({ where }: any) =>
+      typeof where.id === 'string' ? { id: where.id, status: 'SERVED', queueId: 'q1', queue: { serviceId: 's1' } } : null
+    );
+    res = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'transfer', { to: 'loc-1:lab' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].code).toBe('INVALID_TRANSITION');
+
+    (prisma.queueEntry.findFirst as any).mockImplementation(async ({ where }: any) =>
+      typeof where.id === 'string' ? { id: where.id, status: 'WAITING', queueId: 'q1', queue: { serviceId: 's1' } } : null
+    );
+    (checkEntryLimits as any).mockRejectedValueOnce(
+      new (QueueActionError as any)(403, 'LIMIT_REACHED', { error: 'Limit reached', message: 'Daily limit', limitType: 'queueEntriesDaily', current: 5, limit: 5 })
+    );
+    res = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'transfer', { to: 'loc-1:lab' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json.mock.calls[0][0]).toMatchObject({ code: 'LIMIT_REACHED', limitType: 'queueEntriesDaily' });
+    expect(transferEntryToService).not.toHaveBeenCalled();
+  });
+
+  it('answers 409 INVALID_TRANSITION when the source moved during the transfer', async () => {
+    (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1'] });
+    (transferEntryToService as any).mockRejectedValue(new (TransferError as any)('changed', 409, 'INVALID_TRANSITION'));
+    const res = makeRes();
+    await postEntryByRef(byRef('visit', 'V1', 'transfer', { to: 'loc-1:lab' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].code).toBe('INVALID_TRANSITION');
+  });
+
+  it('sets the priority of the visit’s open entry, and validates it', async () => {
+    (setEntryPriority as any).mockResolvedValue({ previousPriority: 0 });
+    const res = makeRes();
+    await postEntryByRef(byRef('visit', 'V1', 'priority', { priority: 70, service: 'clinic-1' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(setEntryPriority).toHaveBeenCalledWith('e1', 70, expect.objectContaining({ origin: ORIGIN }));
+
+    for (const priority of [undefined, 101, -1, 2.5, '50']) {
+      const bad = makeRes();
+      await postEntryByRef(byRef('visit', 'V1', 'priority', { priority }), bad, vi.fn());
+      expect(bad.status).toHaveBeenCalledWith(400);
+    }
+  });
+});
+
+describe('POST /entries with refs.appointment', () => {
+  it('checks the known appointment in and announces it', async () => {
+    refs.push({ resourceType: 'appointment', resourceId: 'a1', externalId: 'APT1' });
+    (prisma.appointment.findFirst as any).mockResolvedValue({ id: 'a1', userId: 'u1' });
+    (prisma.appointment.updateMany as any).mockResolvedValue({ count: 1 });
+    const res = makeRes();
+    await postEntry(makeReq({ body: { ...body, refs: { ...body.refs, appointment: 'APT1' } } }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect((prisma.appointment.updateMany as any).mock.calls[0][0]).toMatchObject({
+      where: { id: 'a1', status: { in: ['SCHEDULED', 'CONFIRMED'] } },
+      data: { status: 'CHECKED_IN' },
+    });
+    expect(recordQueueEvent).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'appointment.checked_in', entryId: 'e1', data: { appointmentId: 'a1', patientId: 'u1' },
+    }));
+  });
+
+  it('ignores an appointment Klargy doesn’t know', async () => {
+    const res = makeRes();
+    await postEntry(makeReq({ body: { ...body, refs: { ...body.refs, appointment: 'APT9' } } }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(prisma.appointment.updateMany).not.toHaveBeenCalled();
   });
 });

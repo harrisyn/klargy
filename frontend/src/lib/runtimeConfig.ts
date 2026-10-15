@@ -6,6 +6,9 @@
 // Env vars are looked up with a computed key on purpose: a literal
 // `process.env.X` in client-reachable code can be inlined at build time.
 
+/** The product's name when APP_NAME isn't set. */
+export const DEFAULT_APP_NAME = 'Klargy';
+
 export type RuntimeConfig = {
   appName: string;
   appDomain: string;
@@ -30,7 +33,7 @@ function env(name: string): string | undefined {
 
 export function readRuntimeConfigFromEnv(): RuntimeConfig {
   return {
-    appName: env('APP_NAME') || 'BetaPosition',
+    appName: env('APP_NAME') || DEFAULT_APP_NAME,
     // NEXT_PUBLIC_APP_DOMAIN is the old name, still honoured.
     appDomain: env('APP_DOMAIN') || env('NEXT_PUBLIC_APP_DOMAIN') || 'localhost:8003',
     apiUrl: env('API_URL') || '/api/v1',

@@ -18,7 +18,7 @@ services:
       CRON_SECRET: ${CRON_SECRET:?}
       APP_URL: ${APP_URL:?}
       APP_DOMAIN: ${APP_DOMAIN:?}
-      APP_NAME: ${APP_NAME:-BetaPosition}
+      APP_NAME: ${APP_NAME:-Klargy}
       SMTP_HOST: ${SMTP_HOST:?}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}

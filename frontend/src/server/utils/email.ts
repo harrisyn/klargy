@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { APP_NAME } from '../config/appConfig';
+import { APP_NAME, DEFAULT_APP_NAME, buildAppUrl } from '../config/appConfig';
 import { issueCode } from '../lib/verification';
 
 // In development, we use Ethereal (fake SMTP) or console logging
@@ -100,6 +100,14 @@ export const sendEmail = async (options: EmailOptions): Promise<{ success: boole
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
+/** The product's app icon before its name in the header - only under the
+ * default name, since a renamed deployment or an organisation's own branding
+ * isn't ours to put a Klargy mark on. PNG, as most mail clients drop SVG. */
+const brandIcon = (brandName: string) =>
+  brandName.trim().toLowerCase() === DEFAULT_APP_NAME.toLowerCase()
+    ? `<img src="${buildAppUrl('/icon-192.png')}" width="32" height="32" alt="" style="display:inline-block;vertical-align:middle;margin:-4px 10px 0 0;border:0;border-radius:8px;">`
+    : '';
+
 /** Shared email shell: flat teal header, white card, muted footer. */
 export const emailLayout = (heading: string, bodyHtml: string, brandName: string = APP_NAME) => `
 <!DOCTYPE html>
@@ -110,7 +118,7 @@ export const emailLayout = (heading: string, bodyHtml: string, brandName: string
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e4e4e7;">
         <tr><td style="background-color:#0a655a;padding:24px 32px;">
-          <p style="margin:0;color:#ffffff;font-size:18px;font-weight:600;">${escapeHtml(brandName)}</p>
+          <p style="margin:0;color:#ffffff;font-size:18px;font-weight:600;">${brandIcon(brandName)}${escapeHtml(brandName)}</p>
         </td></tr>
         <tr><td style="padding:32px;">
           <h1 style="margin:0 0 16px;color:#18181b;font-size:20px;font-weight:600;">${escapeHtml(heading)}</h1>

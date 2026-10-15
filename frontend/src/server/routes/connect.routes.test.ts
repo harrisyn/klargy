@@ -35,6 +35,13 @@ describe('Connect routes', () => {
     expect(CONNECT_SCOPES).toContain('desk:launch');
   });
 
+  it('guards the phase 5 routes with their scopes, and gives new keys those scopes', () => {
+    expect(scopeOf('put', '/appointments/:appointmentRef')).toBe('appointments:write');
+    expect(scopeOf('get', '/analytics')).toBe('analytics:read');
+    expect(scopeOf('post', '/services/:service/status')).toBe('entries:write');
+    expect(CONNECT_SCOPES).toEqual(expect.arrayContaining(['appointments:write', 'analytics:read']));
+  });
+
   it('refuses a key without desk:launch', () => {
     const res: any = { status: vi.fn().mockReturnThis(), json: vi.fn() };
     const next = vi.fn();

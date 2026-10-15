@@ -16,6 +16,8 @@ export const CONNECT_SCOPES = [
   'entries:read',
   'entries:write',
   'desk:launch',
+  'appointments:write',
+  'analytics:read',
 ] as const;
 export type ConnectScope = (typeof CONNECT_SCOPES)[number];
 
