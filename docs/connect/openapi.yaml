@@ -352,7 +352,7 @@ paths:
 
         | action | status | from |
         |---|---|---|
-        | `call` | `SERVING` | `WAITING` |
+        | `call` | `SERVING` | `WAITING` (a held entry is resumed; one awaiting clearance is refused with 409 `AWAITING_CLEARANCE`) |
         | `complete` | `SERVED` | `WAITING`, `SERVING` (runs the service's flow) |
         | `cancel` | `CANCELLED` | `WAITING`, `SERVING` |
         | `no-show` | `NO_SHOW` | `WAITING`, `SERVING` |
@@ -361,8 +361,15 @@ paths:
         nothing, so retries are safe. Send an `Idempotency-Key` (or address
         the entry by `encounter` or `entry`) when retrying a `visit` call:
         after a `complete`, the visit's open entry may be the next ticket a
-        service flow issued. `transfer` and `priority` are described on their
-        own paths.
+        service flow issued. `transfer`, `priority`, `hold`, `resume` and
+        `clear` are described on their own paths.
+
+        `call` with `staff` and no `servicePoint` (phase 6) calls into the room
+        that staff member is signed in to (for a `visit`, choosing the visit's
+        entry in that room's service). If the entry is in another service,
+        409 `ENTRY_IN_OTHER_SERVICE` (with `service`, the entry's Klargy
+        service id): transfer it first. A staff member in no room calls
+        without one, as before.
       parameters:
         - $ref: '#/components/parameters/RefType'
         - $ref: '#/components/parameters/RefId'
@@ -395,7 +402,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: '`INVALID_TRANSITION` (with the entry''s current `status`, except when someone moved it first) or `IDEMPOTENCY_IN_PROGRESS`.'
+          description: '`INVALID_TRANSITION` (with the entry''s current `status`, except when someone moved it first), `AWAITING_CLEARANCE` (`call` of an entry awaiting payment), `ENTRY_IN_OTHER_SERVICE` (`call` with `staff` in a room of another service) or `IDEMPOTENCY_IN_PROGRESS`.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -508,6 +515,190 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: '`IDEMPOTENCY_KEY_REUSED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /entries/by-ref/{type}/{id}/hold:
+    post:
+      tags: [Entries]
+      operationId: holdEntryByRef
+      summary: Put the patient being served on hold
+      description: |
+        Scope `entries:write`. Phase 6. The entry being served leaves the room
+        (`status` back to `WAITING`, `held: true`); the room is free for the next
+        patient. A held entry keeps its place at the front of the line, is never
+        picked by call next, and comes back with `resume` (or `call`). Sends
+        `entry.held`. An entry already on hold returns 200 and nothing changes.
+      parameters:
+        - $ref: '#/components/parameters/RefType'
+        - $ref: '#/components/parameters/RefId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntryActionRequest' }
+      responses:
+        '200':
+          description: The entry (also when nothing changed).
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`NO_OPEN_ENTRY`, `ENTRY_NOT_FOUND`, `SERVICE_NOT_MAPPED` or `SERVICE_POINT_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`INVALID_TRANSITION` (only an entry being served can be put on hold) or `IDEMPOTENCY_IN_PROGRESS`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`INVALID_SERVICE_POINT` or `IDEMPOTENCY_KEY_REUSED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /entries/by-ref/{type}/{id}/resume:
+    post:
+      tags: [Entries]
+      operationId: resumeEntryByRef
+      summary: Call a held patient back
+      description: |
+        Scope `entries:write`. Phase 6. Calls the held entry back (`SERVING`):
+        to `servicePoint` when given, else to the room of `staff` when that
+        staff member is signed in to one, else to the room it was held in. For
+        a `visit`, the visit's held entry is chosen first. Sends `entry.resumed`
+        (not `entry.called`) and tells the patient again. An entry already being
+        served returns 200 and nothing changes.
+      parameters:
+        - $ref: '#/components/parameters/RefType'
+        - $ref: '#/components/parameters/RefId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntryActionRequest' }
+      responses:
+        '200':
+          description: The entry (also when nothing changed).
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`NO_OPEN_ENTRY`, `ENTRY_NOT_FOUND`, `SERVICE_NOT_MAPPED` or `SERVICE_POINT_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`INVALID_TRANSITION` (the entry isn''t on hold), `ENTRY_IN_OTHER_SERVICE` (`staff` is in a room of another service) or `IDEMPOTENCY_IN_PROGRESS`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`INVALID_SERVICE_POINT` or `IDEMPOTENCY_KEY_REUSED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /entries/by-ref/{type}/{id}/clear:
+    post:
+      tags: [Entries]
+      operationId: clearEntryByRef
+      summary: Clear the payment gate
+      description: |
+        Scope `entries:write`. Phase 6. An entry `awaitingClearance` (it joined a
+        service that requires clearance without `cleared: true`) becomes callable:
+        it joins the line by when it arrived. Sends `entry.cleared`. An entry not
+        awaiting clearance returns 200 and nothing changes.
+      parameters:
+        - $ref: '#/components/parameters/RefType'
+        - $ref: '#/components/parameters/RefId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntryActionRequest' }
+      responses:
+        '200':
+          description: The entry (also when nothing changed).
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`NO_OPEN_ENTRY`, `ENTRY_NOT_FOUND`, `SERVICE_NOT_MAPPED` or `SERVICE_POINT_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`INVALID_TRANSITION` (a closed entry) or `IDEMPOTENCY_IN_PROGRESS`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`INVALID_SERVICE_POINT` or `IDEMPOTENCY_KEY_REUSED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /entries/serving/link:
+    post:
+      tags: [Entries]
+      operationId: linkServingEntry
+      summary: Link the walk-in being served to the EMR's patient and visit
+      description: |
+        Scope `entries:write`. Phase 6. Finds the entry being served right now
+        in the room `staff` is signed in to (a receptionist serving a walk-in
+        who has just started a visit in the EMR) and links it: `refs.patient`
+        to its patient (updating the details from `patient` when given),
+        `refs.visit` to its journey, and `refs.encounter` when given. Later
+        calls and events for that visit address this ticket.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServingLinkRequest' }
+      responses:
+        '200':
+          description: The linked entry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`NO_SERVING_ENTRY`: `staff` isn''t mapped, isn''t signed in to a room, or nobody is being served there.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`VISIT_PATIENT_MISMATCH` (the visit is linked to another patient''s journey) or `IDEMPOTENCY_IN_PROGRESS`.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -692,6 +883,9 @@ webhooks:
   entry.no_show: { $ref: '#/components/pathItems/EntryEvent' }
   entry.transferred: { $ref: '#/components/pathItems/EntryTransferredEvent' }
   entry.priority_changed: { $ref: '#/components/pathItems/EntryPriorityChangedEvent' }
+  entry.held: { $ref: '#/components/pathItems/EntryEvent' }
+  entry.resumed: { $ref: '#/components/pathItems/EntryEvent' }
+  entry.cleared: { $ref: '#/components/pathItems/EntryEvent' }
   queue.paused: { $ref: '#/components/pathItems/QueueStatusEvent' }
   queue.resumed: { $ref: '#/components/pathItems/QueueStatusEvent' }
   appointment.created: { $ref: '#/components/pathItems/AppointmentEvent' }
@@ -839,10 +1033,12 @@ components:
     EntryEvent:
       post:
         operationId: onEntryEvent
-        summary: A ticket was issued, called, served, cancelled or marked as not here
+        summary: A ticket was issued, called, served, cancelled, marked as not here, held, resumed or cleared
         description: |
-          `entry.joined`, `entry.called`, `entry.served`, `entry.cancelled` and
-          `entry.no_show`. Ignore events whose `origin.integrationId` is your own
+          `entry.joined`, `entry.called`, `entry.served`, `entry.cancelled`,
+          `entry.no_show`, and from phase 6 `entry.held`, `entry.resumed` (a
+          held entry called back; not also `entry.called`) and `entry.cleared`
+          (an entry awaiting clearance became callable). Ignore events whose `origin.integrationId` is your own
           integration id: they echo your own calls.
         parameters:
           - $ref: '#/components/parameters/WebhookId'
@@ -1343,6 +1539,10 @@ components:
           description: The EMR id of a catalogue service the admin has matched, or a Klargy service id.
         priority: { type: integer, minimum: 0, maximum: 100, default: 0, description: 'Higher is called first.' }
         notes: { type: [string, 'null'], maxLength: 1000, description: 'Shown to staff.' }
+        cleared:
+          type: boolean
+          default: false
+          description: 'Phase 6. Payment is settled: a service that requires clearance lets the patient straight into the line. Sent with the 200 "already open" answer, it clears that entry.'
 
     EntryActionRequest:
       type: object
@@ -1351,8 +1551,8 @@ components:
         encounter: { type: string, description: 'Links the entry to this encounter, even when nothing else changes.' }
         servicePoint:
           type: string
-          description: '`call` only: EMR or Klargy service point id. Picks its desk for the entry''s service where `staff` is signed in, else a free one, else the first.'
-        staff: { type: string, description: 'EMR practitioner id of whoever is acting; recorded when mapped, else ignored.' }
+          description: '`call` and `resume`: EMR or Klargy service point id. Picks its desk for the entry''s service where `staff` is signed in, else a free one, else the first.'
+        staff: { type: string, description: 'EMR practitioner id of whoever is acting; recorded when mapped, else ignored. On `call` and `resume` without `servicePoint`, also picks the room they are signed in to (phase 6).' }
         reason: { type: string, description: 'Recorded and sent in the event.' }
 
     TransferRequest:
@@ -1360,6 +1560,7 @@ components:
       required: [to]
       properties:
         to: { type: string, description: 'EMR or Klargy service id.' }
+        cleared: { type: boolean, default: false, description: 'Phase 6. Payment settled: skips `to`''s clearance gate (and clears the visit''s open entry in `to` on the 200 answer).' }
         service: { type: string, description: 'Narrows the visit''s entry, as for the other actions.' }
         priority: { type: integer, minimum: 0, maximum: 100, description: 'Defaults to the completed entry''s.' }
         encounter: { type: string, description: 'Linked to the new ticket.' }
@@ -1375,6 +1576,41 @@ components:
         encounter: { type: string }
         staff: { type: string }
         reason: { type: string }
+
+    ServingLinkRequest:
+      type: object
+      required: [staff, refs]
+      properties:
+        staff: { type: string, description: 'EMR practitioner id of the staff member serving the walk-in (their `staff` mapping).' }
+        refs:
+          type: object
+          required: [patient, visit]
+          properties:
+            patient: { type: string, maxLength: 200 }
+            visit: { type: string, maxLength: 200 }
+            encounter: { type: [string, 'null'], maxLength: 200 }
+        patient:
+          description: Updates the walk-in's details.
+          oneOf:
+            - $ref: '#/components/schemas/PatientInput'
+            - type: 'null'
+
+    JourneyStep:
+      type: object
+      required: [entryId, ticketNumber, service, status, joinedAt, endedAt]
+      properties:
+        entryId: { type: string }
+        ticketNumber: { type: string }
+        service:
+          type: object
+          required: [id, ref, name]
+          properties:
+            id: { type: string, description: 'Klargy''s service id.' }
+            ref: { type: [string, 'null'], description: 'Your id for the service (its `service` mapping); null elsewhere.' }
+            name: { type: string }
+        status: { $ref: '#/components/schemas/EntryStatus' }
+        joinedAt: { type: string, format: date-time }
+        endedAt: { type: [string, 'null'], format: date-time }
 
     EntryResponse:
       type: object
@@ -1449,6 +1685,10 @@ components:
         - patient
         - statusUrl
         - position
+        - held
+        - awaitingClearance
+        - sentBy
+        - journey
       properties:
         entryId: { type: string }
         ticketNumber: { type: string, examples: [G012] }
@@ -1474,7 +1714,21 @@ components:
           description: The patient's live status page. Safe to show or send to the patient; needs no sign-in.
         position:
           type: [integer, 'null']
-          description: Place in line (1 = next) while WAITING, when the object was made; null otherwise.
+          description: Place in line (1 = next) while WAITING, when the object was made; null otherwise (also while held or awaiting clearance).
+        held:
+          type: boolean
+          description: 'Phase 6. On hold: status WAITING, out of the room, at the front of the line, not picked by call next.'
+        awaitingClearance:
+          type: boolean
+          description: 'Phase 6. Joined a service that requires clearance and not cleared yet: shown as "Awaiting payment", skipped by call next, not callable.'
+        sentBy:
+          type: [string, 'null']
+          enum: [staff, patient, integration, null]
+          description: 'Phase 6. For an entry made by a transfer, who sent it: `staff` (in Klargy, such as the desk), `patient` (from their status page), `integration` (a Connect call); null for a first ticket or an automatic service flow.'
+        journey:
+          type: array
+          description: 'Phase 6. The visit''s entries today, oldest first (this one included).'
+          items: { $ref: '#/components/schemas/JourneyStep' }
 
     Entry:
       description: The entry object (Connect responses and desk messages). Webhook `data` without `origin`.
@@ -1522,6 +1776,13 @@ components:
         - type: object
           required: [fromEntryId, fromServiceId, toServiceId]
           properties:
+            from:
+              description: 'Phase 6. The source entry (completed), as an entry object with its own `refs` (visit, encounter) on the integration''s endpoint. `origin.type` is `staff` for the desk, `public` for the patient''s status page; `sentBy` says the same.'
+              allOf:
+                - $ref: '#/components/schemas/EntryBase'
+                - type: object
+                  properties:
+                    refs: { $ref: '#/components/schemas/EntryRefs' }
             fromEntryId: { type: string }
             fromServiceId: { type: string }
             toServiceId: { type: string }

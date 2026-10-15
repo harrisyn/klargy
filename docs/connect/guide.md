@@ -366,6 +366,35 @@ await klargy.set_service_status("CLIN-GP", {"status": "PAUSED"})
 
 `transfer` keeps the visit's journey and links the new ticket to the completed one. If the visit is already queued at `to`, it answers 200 and changes nothing, so you can call it on every relevant event in your EMR. Klargy's own service flows can transfer automatically when an entry is completed. Those events carry `origin.type: "system"`.
 
+### 7.1 The outpatient journey
+
+For a clinic that runs Reception, Cashier, Triage, Consultation, Laboratory, Imaging and Pharmacy in one waiting area, see [Running an outpatient journey](../guides/outpatient-journey.md). From the EMR side it uses:
+
+```ts
+// Consultation unpaid at check-in: the ticket waits for payment ("Awaiting payment" on the desk).
+await klargy.createEntry({ service: 'CLIN-GP', refs: { patient: p.id, visit: v.id }, cleared: false });
+// The bill is paid: the patient joins the line by when they arrived.
+await klargy.clearEntry('visit', v.id);
+
+// The doctor calls the patient into the room they are signed in to.
+await klargy.callEntry('visit', v.id, { staff: doctor.id });
+// Out for a sample and back.
+await klargy.holdEntry('visit', v.id);
+await klargy.resumeEntry('visit', v.id, { staff: doctor.id });
+
+// The receptionist serving a walk-in starts their visit in the EMR.
+await klargy.linkServingEntry({ staff: receptionist.id, refs: { patient: p.id, visit: v.id } });
+```
+
+```python
+await klargy.clear_entry("visit", visit.id)
+await klargy.call_entry("visit", visit.id, {"staff": doctor.id})
+await klargy.hold_entry("visit", visit.id)
+await klargy.link_serving_entry({"staff": receptionist.id, "refs": {"patient": p.id, "visit": visit.id}})
+```
+
+Every entry carries `held`, `awaitingClearance`, `sentBy` and `journey`; `entry.transferred` carries `from` (with `from.refs.encounter`, the encounter the patient just left). New events: `entry.held`, `entry.resumed`, `entry.cleared`. Handle `AWAITING_CLEARANCE`, `ENTRY_IN_OTHER_SERVICE` and `NO_SERVING_ENTRY`. Details: [v1 section 9](./v1.md#9-the-patient-journey-phase-6).
+
 ## 8. Appointments
 
 Mirror your appointments so Klargy sends its usual reminders and checks people in when they arrive:
