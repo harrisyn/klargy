@@ -84,6 +84,44 @@ export interface NotificationSettings {
   sms: boolean;
 }
 
+export interface WhatsAppTemplateMappingInfo {
+  name: string;
+  language: string;
+  status?: string;
+  variables: string[];
+  contentSid?: string;
+  category?: string;
+}
+
+export interface WhatsAppSettingsInfo {
+  configured: boolean;
+  webhookUrl: string;
+  provider?: string;
+  isEnabled?: boolean;
+  settings?: Record<string, string>;
+  secretsMasked?: Record<string, string | null>;
+  verifyToken?: string | null;
+  webhookSecret?: string | null;
+  templates?: Record<string, WhatsAppTemplateMappingInfo>;
+  fallbackToSms?: boolean;
+  consentMode?: 'EXPLICIT' | 'IMPLIED';
+  defaultCountryCode?: string | null;
+  lastTestedAt?: string | null;
+  lastTestOk?: boolean | null;
+  lastTestMessage?: string | null;
+  contacts?: { optedIn: number; optedOut: number };
+}
+
+export interface WhatsAppProviderTemplate {
+  name: string;
+  language: string;
+  status: string;
+  category?: string;
+  body?: string;
+  paramCount: number;
+  contentSid?: string;
+}
+
 export interface WebhookEndpoint {
   id: string;
   url: string;
@@ -581,6 +619,48 @@ class ApiClient {
 
   async deleteCustomDomain(organizationId: string) {
     await this.client.delete(`/orgs/${organizationId}/custom-domain`);
+  }
+
+  async getWhatsApp(organizationId: string) {
+    const { data } = await this.client.get(`/orgs/${organizationId}/whatsapp`);
+    return data as WhatsAppSettingsInfo;
+  }
+
+  async saveWhatsApp(
+    organizationId: string,
+    body: {
+      provider: string;
+      isEnabled: boolean;
+      settings: Record<string, string>;
+      secrets: Record<string, string>;
+      templates: Record<string, WhatsAppTemplateMappingInfo>;
+      fallbackToSms: boolean;
+      consentMode: 'EXPLICIT' | 'IMPLIED';
+      defaultCountryCode: string;
+    }
+  ) {
+    const { data } = await this.client.put(`/orgs/${organizationId}/whatsapp`, body);
+    return data as WhatsAppSettingsInfo;
+  }
+
+  async deleteWhatsApp(organizationId: string) {
+    const { data } = await this.client.delete(`/orgs/${organizationId}/whatsapp`);
+    return data as WhatsAppSettingsInfo;
+  }
+
+  async testWhatsApp(organizationId: string) {
+    const { data } = await this.client.post(`/orgs/${organizationId}/whatsapp/test`);
+    return data as { ok: boolean; message: string };
+  }
+
+  async sendWhatsAppTest(organizationId: string, to: string) {
+    const { data } = await this.client.post(`/orgs/${organizationId}/whatsapp/send-test`, { to });
+    return data as { ok: true; via: 'text' | 'template'; messageId: string | null };
+  }
+
+  async syncWhatsAppTemplates(organizationId: string) {
+    const { data } = await this.client.post(`/orgs/${organizationId}/whatsapp/templates/sync`);
+    return data as { available: WhatsAppProviderTemplate[]; templates: Record<string, WhatsAppTemplateMappingInfo> };
   }
 
   async getUsers(params?: { organizationId?: string; role?: string }) {
