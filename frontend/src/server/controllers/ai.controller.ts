@@ -5,8 +5,9 @@ import { loadCaller } from '../middleware/tenantScope.middleware';
 import { getOrganizationFeatures, consumeCredits } from '../middleware/subscription.middleware';
 import { runAnalyticsAgent, AiNotConfiguredError, DIGEST_QUESTION } from '../services/ai/agent';
 import { forecastService, locationAlerts } from '../services/ai/forecast';
-import { buildProvider, getActiveProviderSettings, PROVIDER_NAMES, ProviderName, AiProviderError } from '../services/ai';
+import { buildProvider, getActiveProviderSettings, withEnvOptions, PROVIDER_NAMES, ProviderName, AiProviderError } from '../services/ai';
 import { ANTHROPIC_DEFAULT_MODEL } from '../services/ai/providers/anthropic';
+import { OPENAI_DEFAULT_MODEL } from '../services/ai/providers/openaiCommon';
 
 async function callerOrgId(req: Request): Promise<string | null> {
   const caller = await loadCaller(req);
@@ -166,7 +167,28 @@ export async function createDailyDigest(organizationId: string) {
 // Superadmin: provider configuration
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MODELS: Partial<Record<ProviderName, string>> = { anthropic: ANTHROPIC_DEFAULT_MODEL };
+const DEFAULT_MODELS: Partial<Record<ProviderName, string>> = { anthropic: ANTHROPIC_DEFAULT_MODEL, openai: OPENAI_DEFAULT_MODEL };
+const NEEDS_BASE_URL: ProviderName[] = ['openai_compatible', 'azure_openai'];
+const OPENAI_FAMILY: ProviderName[] = ['openai', 'azure_openai', 'openai_compatible'];
+
+/** Why a provider config is incomplete, or null if it's usable. */
+function configProblem(provider: ProviderName, model: string | null, baseUrl: string | null): string | null {
+  if (!DEFAULT_MODELS[provider] && !model) {
+    return provider === 'azure_openai' ? 'Enter the Azure deployment name as the model' : 'model is required for this provider';
+  }
+  if (NEEDS_BASE_URL.includes(provider)) {
+    if (!baseUrl) return provider === 'azure_openai' ? 'Enter the Azure OpenAI endpoint' : 'baseUrl is required for an OpenAI-compatible provider';
+  }
+  if (baseUrl) {
+    try {
+      const url = new URL(baseUrl);
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'The base URL must start with https://';
+    } catch {
+      return 'The base URL is not a valid URL';
+    }
+  }
+  return null;
+}
 
 export const listAiProviders = async (_req: Request, res: Response, next: NextFunction) => {
   try {
@@ -199,8 +221,8 @@ export const upsertAiProvider = async (req: Request, res: Response, next: NextFu
     const { apiKey, model, baseUrl, isActive } = req.body;
     const existing = await prisma.aiProviderConfig.findUnique({ where: { provider } });
     if (!apiKey && !existing) return res.status(400).json({ error: 'apiKey is required' });
-    if (provider !== 'anthropic' && !model) return res.status(400).json({ error: 'model is required for this provider' });
-    if (provider === 'openai_compatible' && !baseUrl) return res.status(400).json({ error: 'baseUrl is required for an OpenAI-compatible provider' });
+    const problem = configProblem(provider, model || null, baseUrl || null);
+    if (problem) return res.status(400).json({ error: problem });
 
     const data = {
       model: model || null,
@@ -220,20 +242,43 @@ export const upsertAiProvider = async (req: Request, res: Response, next: NextFu
   }
 };
 
-/** Sends a one-line prompt to the saved config (active or not). */
-export const testAiProvider = async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Checks a key and model with one tiny request. Uses the values in the body
+ * when given (so the form can be tested before saving), falling back to the
+ * saved config for anything left empty, including the key.
+ */
+export const testAiProvider = async (req: Request, res: Response, _next: NextFunction) => {
   try {
     const provider = req.params.provider as ProviderName;
+    if (!PROVIDER_NAMES.includes(provider)) return res.status(400).json({ ok: false, error: 'Unknown provider' });
     const config = await prisma.aiProviderConfig.findUnique({ where: { provider } });
-    if (!config) return res.status(404).json({ ok: false, error: 'Save this provider first' });
-    const llm = buildProvider({ provider, apiKey: decrypt(config.encryptedApiKey), model: config.model, baseUrl: config.baseUrl });
+    const body = req.body ?? {};
+    const apiKey = String(body.apiKey || '') || (config ? decrypt(config.encryptedApiKey) : '');
+    if (!apiKey) return res.status(400).json({ ok: false, error: 'Enter an API key to test' });
+    const model = String(body.model || '') || config?.model || null;
+    const baseUrl = String(body.baseUrl || '') || config?.baseUrl || null;
+    const problem = configProblem(provider, model, baseUrl);
+    if (problem) return res.status(400).json({ ok: false, error: problem });
+
+    const llm = buildProvider(withEnvOptions({ provider, apiKey, model, baseUrl }));
+    const started = Date.now();
     const result = await llm.chat({
       system: 'You are a connectivity check.',
       messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
       tools: [],
-      maxTokens: 1024,
+      // Small on purpose for the OpenAI family. A reasoning model may spend it
+      // all on reasoning and stop at the limit; that still proves the key and
+      // model work. Other adapters keep the previous headroom.
+      maxTokens: OPENAI_FAMILY.includes(provider) ? 64 : 1024,
     });
-    res.json({ ok: result.stop !== 'refusal', model: result.model, reply: result.text.slice(0, 100) });
+    res.json({
+      ok: result.stop !== 'refusal',
+      model: result.model,
+      api: llm.api ?? null,
+      latencyMs: Date.now() - started,
+      reply: result.text.slice(0, 100),
+      ...(result.stop === 'refusal' ? { error: 'The model declined the test prompt' } : {}),
+    });
   } catch (error) {
     if (error instanceof AiProviderError) return res.status(400).json({ ok: false, error: error.message });
     res.status(400).json({ ok: false, error: error instanceof Error ? error.message : 'Test failed' });

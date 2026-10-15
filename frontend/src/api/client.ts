@@ -173,7 +173,7 @@ export interface WaitAlert {
 }
 
 export interface AiProviderConfig {
-  provider: 'anthropic' | 'openai' | 'gemini' | 'openai_compatible';
+  provider: 'anthropic' | 'openai' | 'azure_openai' | 'gemini' | 'openai_compatible';
   configured: boolean;
   isActive: boolean;
   model: string | null;
@@ -1141,8 +1141,12 @@ class ApiClient {
     return data;
   }
 
-  async testAiProvider(provider: string): Promise<{ ok: boolean; model?: string; reply?: string; error?: string }> {
-    const { data } = await this.client.post(`/superadmin/ai-providers/${provider}/test`);
+  /** Tests the given (possibly unsaved) values; empty fields fall back to the saved config. */
+  async testAiProvider(
+    provider: string,
+    payload: { apiKey?: string; model?: string; baseUrl?: string } = {}
+  ): Promise<{ ok: boolean; model?: string; api?: string | null; latencyMs?: number; reply?: string; error?: string }> {
+    const { data } = await this.client.post(`/superadmin/ai-providers/${provider}/test`, payload);
     return data;
   }
 
