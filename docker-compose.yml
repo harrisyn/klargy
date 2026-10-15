@@ -21,7 +21,7 @@ services:
       # Encrypts payment/integration secrets at rest - override in production
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-dev-only-master-encryption-key-change-in-production}
       # Public base URL (root domain); tenant URLs are <slug>.<host>
-      APP_URL: http://localhost:8003
+      APP_URL: ${APP_URL:-http://localhost:8003}
       # Product name shown across the UI and in emails - the single place to
       # rebrand the app is APP_NAME in the repo-root .env.
       APP_NAME: ${APP_NAME:-Klargy}

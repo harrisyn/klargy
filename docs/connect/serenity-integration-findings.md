@@ -181,3 +181,35 @@ Klargy (local database):
 
 Suggested clean-up: unsubscribe the plugin (or rotate the sandbox key), end the visit, cancel the test
 appointment, and delete the sandbox workspace when finished.
+
+## 6. Fixed
+
+Klargy (branch `claude/project-thread-mj02be`):
+
+- **K1:** links (desk launch, `statusUrl`, emails) are built by `appUrl()`. With `APP_URL` set it is used as
+  before. In development without it, Klargy uses the protocol and root host of the requests it serves (so
+  `npm run dev` on :3000 links to `<slug>.localhost:3000`). In production the app refuses to start without
+  `APP_URL`, with a message saying what to set. `docker-compose.yml` now passes `APP_URL` through from `.env`.
+- **K2:** error responses never carry a stack trace in any environment (it stays in the server log).
+  `MASTER_ENCRYPTION_KEY` falls back to the docker-compose development default outside production (with a
+  one-time warning); production still refuses, with a message on how to generate and keep the key.
+- **K3:** new repo-root `.env.example` with `APP_URL`, `APP_DOMAIN` and `MASTER_ENCRYPTION_KEY` (and the other
+  compose settings); `frontend/.env.example` explains the local values.
+- **K4:** "Running both on one machine" in [guide.md section 10](./guide.md#10-testing-in-the-sandbox) and
+  `docs/DEPLOYMENT.md` separate the API address (`host.docker.internal`, ignored by the key check) from the
+  workspace address (`<slug>.<APP_DOMAIN>`, what browsers open).
+- **K5:** `agentRules: false` in `frontend/next.config.ts` (supported by Next 16.3), so `next dev` no longer
+  rewrites the tracked `AGENTS.md` and `CLAUDE.md`.
+
+Serenity (to be filled in by the Serenity changes):
+
+- **S1:** _pending_
+- **S2:** _pending_
+- **S3:** _pending_
+- **S4:** _pending_
+- **S5:** _pending_
+- **S6:** _pending_
+- **S7:** _pending_
+- **S8:** _pending_
+- **S9:** _pending_
+- **S10:** _pending_

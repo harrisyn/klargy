@@ -460,6 +460,17 @@ Then:
 4. Run a visit end to end: check in (`POST /entries`), call it from your app or the desk, transfer it to the lab and the cashier, and watch the pharmacy ticket appear by itself. Check that the webhooks arrive and that you ignore your own echoes.
 5. Use **Send test** on the connection page to check your webhook endpoint.
 
+#### Running both on one machine
+
+Two Klargy addresses matter, and locally they often differ:
+
+| Address | Used for | Example (Klargy in Docker on :8003) |
+| --- | --- | --- |
+| **API address** | Your server's Connect calls (`baseUrl`). Authenticated by the key; the host is ignored. | `http://host.docker.internal:8003` from an EMR in its own container, `http://localhost:8003` from the host |
+| **Workspace address** | What a browser opens: the desk iframe (`launchDesk` URL), `statusUrl`, the embed script. Always `<slug>.<APP_DOMAIN>`. | `http://acme-emr-sandbox.localhost:8003` |
+
+Klargy builds the workspace address from its `APP_URL` (in Docker, `http://localhost:8003` by default; with `npm run dev`, set `APP_URL=http://localhost:3000` or leave it empty and Klargy follows the address it is opened on). A container cannot resolve `*.localhost`, so don't use the workspace address as `baseUrl` from inside Docker, and don't hand the API address to a browser. Your `embedOrigin` is your EMR's browser origin (for example `http://localhost:3000`).
+
 Klargy only posts to public addresses. To receive webhooks on a laptop, use a tunnel (any https tunnel works). For your own automated tests, sign requests with `signedHeaders` (TypeScript) or `signature_headers` (Python) exactly as Klargy does.
 
 ## 11. Go-live checklist

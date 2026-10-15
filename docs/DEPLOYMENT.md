@@ -108,6 +108,19 @@ docker compose exec app node scripts/create-superadmin.js   # first platform adm
 
 The database is also reachable from the host on port 5433.
 
+Settings for `docker compose` go in the repo-root `.env` (see `.env.example`;
+every value has a development default). Without Docker (`cd frontend && npm run dev`,
+on :3000), use `frontend/.env`: set `APP_URL=http://localhost:3000` and
+`APP_DOMAIN=localhost:3000`, or leave `APP_URL` empty and links follow the
+address the app is opened on. `MASTER_ENCRYPTION_KEY` may stay empty in
+development (the same development-only default as Docker). In production
+both are required, and the app refuses to start without `APP_URL`.
+
+An EMR running in its own containers reaches the API at
+`http://host.docker.internal:8003` but opens the desk and status pages on the
+workspace host (`<slug>.localhost:8003`); see "Running both on one machine" in
+[docs/connect/guide.md](connect/guide.md#10-testing-in-the-sandbox).
+
 The desk widget can be tried outside the app with `/widget/desk`, or embedded
 in any page with `<script src="http://<slug>.localhost:8003/embed/desk.js" async></script>`.
 

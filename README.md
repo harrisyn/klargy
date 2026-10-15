@@ -29,8 +29,10 @@ docker compose up
 Migrations run automatically when the app container starts. To create a
 superadmin: `docker exec qms-app node scripts/create-superadmin.js`.
 
-Without Docker: `cd frontend && npm install && npm run dev` (needs a `.env`
-based on `frontend/.env.example`).
+Settings for Docker go in the repo-root `.env` (see `.env.example`). Without
+Docker: `cd frontend && npm install && npm run dev` (needs a `.env` based on
+`frontend/.env.example`; set `APP_URL=http://localhost:3000` there, or leave it
+empty in development and links follow the address you open).
 
 ## Layout
 
