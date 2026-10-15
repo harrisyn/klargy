@@ -22,7 +22,38 @@ export type DeskMessage =
   | { type: 'klargy:desk-changed'; servicePoint: DeskServicePoint | null }
   | { type: 'klargy:waiting'; count: number }
   | { type: 'klargy:entry-called'; entry: Record<string, unknown> }
-  | { type: 'klargy:entry-updated'; entry: Record<string, unknown> };
+  | { type: 'klargy:entry-updated'; entry: Record<string, unknown> }
+  | { type: 'klargy:resize'; height: number };
+
+/** How the desk is laid out: the full panel (default) or one compact
+ * horizontal bar for a host's floating toolbar (`?layout=bar`). */
+export type DeskLayout = 'default' | 'bar';
+
+/** The layout named in the desk URL's query string. */
+export function deskLayoutFrom(search: string): DeskLayout {
+  return new URLSearchParams(search).get('layout') === 'bar' ? 'bar' : 'default';
+}
+
+/** The query string without the one-time launch code, keeping everything
+ * else (such as `layout`), so a reload doesn't send the code again. */
+export function withoutLaunchCode(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete('launch');
+  const rest = params.toString();
+  return rest ? `?${rest}` : '';
+}
+
+/** Reports the height the bar needs (row only, or with a menu open) to the
+ * host, once per change, in whole pixels. */
+export function resizeReporter(post: (message: DeskMessage) => boolean) {
+  let last: number | null = null;
+  return (height: number) => {
+    if (!Number.isFinite(height) || height <= 0) return;
+    const px = Math.ceil(height);
+    if (px === last) return;
+    if (post({ type: 'klargy:resize', height: px })) last = px;
+  };
+}
 
 const KEY = 'klargy_desk_launch';
 

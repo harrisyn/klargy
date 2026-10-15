@@ -294,6 +294,17 @@ export function useDesk(options: UseDeskOptions = {}) {
     setAfterComplete(null);
   }), [run, queueId, afterComplete, report]);
 
+  // Send the person being served straight on to another service (their
+  // ticket here is finished and they get a new one there).
+  const transfer = useCallback((service: { serviceId: string; displayName: string }) => run('transfer', async () => {
+    if (!queueId || !current) return;
+    const entry = current;
+    const result = await api.transferEntry(queueId, entry.id, service.serviceId);
+    report('updated', entry.id);
+    report('updated', result.entry?.id);
+    setNotice(`${personName(entry) || entry.ticketNumber} is now ${result.ticketNumber} at ${result.serviceName || service.displayName}.`);
+  }), [run, queueId, current, report]);
+
   const noShow = useCallback(() => run('noshow', async () => {
     if (!queueId || !current) return;
     await api.markNoShow(queueId, current.id);
@@ -323,7 +334,7 @@ export function useDesk(options: UseDeskOptions = {}) {
   return {
     ready, desk, data, current, waiting, otherDesks, busy, error, notice, afterComplete, terms,
     setError, dismissAfterComplete: () => setAfterComplete(null),
-    signIn, leave, callNext, recall, complete, sendTo, noShow, reorder, refresh, finishOther,
+    signIn, leave, callNext, recall, complete, sendTo, transfer, noShow, reorder, refresh, finishOther,
   };
 }
 

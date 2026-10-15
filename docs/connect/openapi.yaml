@@ -525,7 +525,9 @@ paths:
         records the mapping), else registers them as service staff. The code
         in `url` works once, within 60 seconds: load it in an iframe straight
         away. The desk then talks only to `returnOrigin` (see the desk
-        protocol in v1.md section 6).
+        protocol in v1.md section 6). Add `layout=bar` to `url` for the
+        compact one-row layout, which posts `klargy:resize` with the frame
+        height it needs.
       requestBody:
         required: true
         content:

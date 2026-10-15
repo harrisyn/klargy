@@ -6,15 +6,20 @@ import api from '@/api/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 import DeskPanel, { useDeskShortcuts } from '@/components/desk/DeskPanel';
 import DeskPicker from '@/components/desk/DeskPicker';
+import DeskBar from '@/components/desk/DeskBar';
 import { useDesk, type DeskEntryEvent } from '@/components/desk/useDesk';
 import {
   CONTRACT,
   clearLaunch,
+  deskLayoutFrom,
   isLogoutRequest,
   postToHost,
   readLaunch,
+  resizeReporter,
   saveLaunch,
+  withoutLaunchCode,
   type DeskLaunch,
+  type DeskLayout,
   type DeskMessage,
 } from '@/components/desk/connectBridge';
 import { extractSubdomain } from '@/lib/subdomain';
@@ -24,6 +29,8 @@ import { extractSubdomain } from '@/lib/subdomain';
  * Picture-in-Picture, for embedding in other apps (see /embed/desk.js), for
  * installing as a small app from the browser menu, and inside an EMR through
  * Klargy Connect (opened with ?launch=<code>, docs/connect/v1.md section 6).
+ * `?layout=bar` lays it out as one compact bar for a host's floating
+ * toolbar; the bar reports the height it needs with klargy:resize.
  */
 
 function WidgetSignIn() {
@@ -60,7 +67,7 @@ function WidgetSignIn() {
 
 const parentWindow = () => (typeof window !== 'undefined' && window.parent !== window ? window.parent : null);
 
-function WidgetDesk({ launch, onSignedOut }: { launch: DeskLaunch | null; onSignedOut: () => void }) {
+function WidgetDesk({ launch, layout, onSignedOut }: { launch: DeskLaunch | null; layout: DeskLayout; onSignedOut: () => void }) {
   const { logout, isStaff } = useAuthContext();
 
   const post = useCallback((message: DeskMessage) => postToHost(parentWindow(), launch, message), [launch]);
@@ -144,6 +151,7 @@ function WidgetDesk({ launch, onSignedOut }: { launch: DeskLaunch | null; onSign
     return <div className="widget-msg"><p>This account can’t call from a desk. Ask an admin for staff access.</p><button type="button" className="link-button" onClick={signOut}>Sign out</button></div>;
   }
   if (!desk.ready) return <div className="widget-msg"><Loader2 className="qf-spin" /></div>;
+  if (layout === 'bar') return <DeskBar desk={desk} onSignOut={signOut} preferServicePointId={launch?.servicePointId ?? null} />;
   if (!desk.desk) return <DeskPicker desk={desk} compact preferServicePointId={launch?.servicePointId ?? null} />;
 
   return (
@@ -169,12 +177,15 @@ type LaunchState =
 export default function WidgetDeskPage() {
   const { isAuthenticated, loading, signInWithLaunch } = useAuthContext();
   const [state, setState] = useState<LaunchState>({ status: 'checking' });
+  const [layout, setLayout] = useState<DeskLayout>('default');
   const started = useRef(false);
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
     const params = new URLSearchParams(window.location.search);
+    // Read from the address, which keeps it after the code is removed.
+    setLayout(deskLayoutFrom(window.location.search));
     const code = params.get('launch');
     if (!code) {
       const stored = readLaunch();
@@ -182,9 +193,7 @@ export default function WidgetDeskPage() {
       return;
     }
     // The code works once: a reload must not send it again.
-    params.delete('launch');
-    const rest = params.toString();
-    window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
+    window.history.replaceState(null, '', `${window.location.pathname}${withoutLaunchCode(window.location.search)}${window.location.hash}`);
     setState({ status: 'exchanging' });
     signInWithLaunch(code)
       .then((launch) => {
@@ -200,6 +209,22 @@ export default function WidgetDeskPage() {
   const onSignedOut = useCallback(() => setState({ status: 'signed-out' }), []);
   const launch = state.status === 'ready' ? state.launch : null;
 
+  // The bar tells the host how tall it needs to be (row only, or with a
+  // menu open), including after signing out, so the host can size the frame.
+  const main = useRef<HTMLElement | null>(null);
+  const [reportTo, setReportTo] = useState<DeskLaunch | null>(null);
+  if (launch && launch !== reportTo) setReportTo(launch);
+  useEffect(() => {
+    const el = main.current;
+    if (layout !== 'bar' || !reportTo || !el || typeof ResizeObserver === 'undefined') return;
+    const report = resizeReporter((message) => postToHost(parentWindow(), reportTo, message));
+    const measure = () => report(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    measure();
+    return () => observer.disconnect();
+  }, [layout, reportTo]);
+
   let body: React.ReactNode;
   if (state.status === 'checking' || state.status === 'exchanging' || (loading && state.status !== 'failed')) {
     body = <div className="widget-msg"><Loader2 className="qf-spin" /></div>;
@@ -208,7 +233,7 @@ export default function WidgetDeskPage() {
   } else if (state.status === 'signed-out') {
     body = <div className="widget-msg"><p>You’ve left the desk and signed out.</p></div>;
   } else if (isAuthenticated) {
-    body = <WidgetDesk launch={launch} onSignedOut={onSignedOut} />;
+    body = <WidgetDesk launch={launch} layout={layout} onSignedOut={onSignedOut} />;
   } else if (launch) {
     // Opened from an EMR, and the session has ended: only the EMR can sign
     // this person in again.
@@ -217,5 +242,5 @@ export default function WidgetDeskPage() {
     body = <WidgetSignIn />;
   }
 
-  return <main className="widget">{body}</main>;
+  return <main ref={main} className="widget" data-layout={layout}>{body}</main>;
 }

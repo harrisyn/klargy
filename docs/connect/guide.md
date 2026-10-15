@@ -285,7 +285,9 @@ Your practitioners can call and move patients from Klargy's desk inside your app
 
 The desk posts only to your `returnOrigin` and accepts `klargy:logout` only from it. `embedDesk` likewise accepts messages only from the frame's window and Klargy's origin. Messages are fire-and-forget: webhooks remain the record. If the code expired (for example the page was opened from history), the desk asks the practitioner to open it again: call `/desk/launch` again.
 
-Without the package, listen for `message` events where `event.origin` is the launch URL's origin. The types are `klargy:ready`, `klargy:desk-changed`, `klargy:waiting`, `klargy:entry-called` and `klargy:entry-updated` ([v1 section 6](./v1.md#6-the-desk-inside-the-emr-phase-3)). To sign out, post `{type: 'klargy:logout'}` to that origin.
+Without the package, listen for `message` events where `event.origin` is the launch URL's origin. The types are `klargy:ready`, `klargy:desk-changed`, `klargy:waiting`, `klargy:entry-called`, `klargy:entry-updated` and, in the bar layout, `klargy:resize` ([v1 section 6](./v1.md#6-the-desk-inside-the-emr-phase-3)).
+
+For a floating toolbar rather than a panel, add `layout=bar` to the URL (or pass `layout: 'bar'` to `embedDesk`): the desk becomes one row about 60px tall and posts `klargy:resize` with the height it needs when a menu opens or closes; size the frame to it with `onResize`. To sign out, post `{type: 'klargy:logout'}` to that origin.
 
 ## 6. Serve patient lookup
 

@@ -194,6 +194,18 @@ desk.destroy();
 
 Messages are accepted only from the frame's own window and the launch URL's origin. `logout` is posted only to that origin. `parseDeskMessage`, `DESK_MESSAGES` and `CONTRACT` are exported for custom handling.
 
+For a floating toolbar, load the compact one-row layout and size the frame to what it asks for (it grows while a menu is open):
+
+```ts
+const bar = embedDesk({
+  container: document.getElementById('klargy-bar')!,
+  url,
+  layout: 'bar', // adds layout=bar to the URL; deskUrl(url, 'bar') does the same
+  onResize: (height) => { bar.iframe.style!.height = `${Math.min(Math.max(height, 56), 480)}px`; },
+  onWaiting: (count) => setBubbleBadge(count),
+});
+```
+
 ## Development
 
 ```sh

@@ -147,6 +147,63 @@ kbd {
 .widget-signin h1 { margin: 4px 0; font-size: 1.25rem; }
 .widget-signin .desk-call { justify-content: center; text-align: center; }
 .widget-msg { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 10px; text-align: center; color: var(--gray-600); }
+/* ---- bar layout (/widget/desk?layout=bar): one row for a host's floating toolbar ---- */
+.widget[data-layout="bar"] { min-height: 0; padding: 0; background: white; }
+.widget[data-layout="bar"] .widget-msg { flex-direction: row; justify-content: center; padding: 14px 16px; min-height: 60px; box-sizing: border-box; font-size: 0.9375rem; }
+.widget[data-layout="bar"] .widget-msg p { margin: 0; }
+.widget[data-layout="bar"] .widget-signin { padding: 12px 16px; }
+.desk-bar { container-type: inline-size; font-family: var(--font-sans); color: var(--gray-800); }
+.desk-bar-row { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px 10px; min-height: 60px; padding: 10px 12px; box-sizing: border-box; }
+.desk-bar .desk-bar-room {
+  flex: 0 1 180px; width: auto; min-width: 120px; max-width: 200px; height: 38px; padding: 0 8px; border-radius: 10px;
+  border: 1.5px solid var(--gray-300); background-color: white; font: 600 0.875rem var(--font-sans); color: var(--navy-700);
+}
+.desk-bar-now { flex: 1 1 0; overflow: hidden; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.desk-bar-ticket {
+  flex-shrink: 0; padding: 4px 10px; border-radius: 8px; background: var(--navy-600); color: white;
+  font: 750 1.125rem/1.2 var(--font-display); letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
+}
+.desk-bar-name { min-width: 0; font-weight: 650; color: var(--gray-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk-bar-none, .desk-bar-hint { color: var(--gray-500); font-size: 0.9375rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.desk-bar-hint { flex: 1 1 200px; }
+.desk-bar-waiting { flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.desk-bar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.desk-bar .desk-btn { height: 38px; padding: 0 11px; font-size: 0.875rem; gap: 6px; white-space: nowrap; }
+.desk-bar .desk-bar-call { background: var(--primary-600); border-color: var(--primary-600); }
+.desk-bar .desk-bar-call:hover:not(:disabled) { background: var(--primary-700); border-color: var(--primary-700); }
+.desk-bar .desk-bar-more { width: 38px; padding: 0; justify-content: center; }
+.desk-bar .desk-btn[aria-expanded="true"] { border-color: var(--primary-500); color: var(--primary-700); background: var(--primary-50); }
+.desk-bar-panel { padding: 10px 12px 12px; border-top: 1px solid var(--gray-200); background: var(--gray-50); }
+.desk-bar-panel > p { margin: 0 0 8px; font-size: 0.875rem; color: var(--gray-700); }
+.desk-bar-panel .desk-after-options { gap: 6px; }
+.desk-bar-muted { display: flex; align-items: center; gap: 6px; color: var(--gray-500); }
+.desk-bar-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.desk-bar-menu-end { display: flex; gap: 6px; margin-left: auto; }
+.desk-bar-location { display: flex; align-items: center; gap: 8px; font-size: 0.875rem; color: var(--gray-600); }
+.desk-bar-location select { width: auto; height: 38px; padding: 0 8px; font: 600 0.875rem var(--font-sans); border-radius: 10px; }
+.desk-bar-narrow { display: none; gap: 6px; }
+.desk-bar-msg { margin: 0 12px 10px; padding: 6px 10px; font-size: 0.8125rem; }
+@container (max-width: 1040px) {
+  .desk-bar .desk-bar-label-wide { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .desk-bar .desk-bar-wide { width: 38px; padding: 0; justify-content: center; }
+}
+@container (max-width: 860px) {
+  .desk-bar .desk-bar-wide { display: none; }
+  .desk-bar-narrow { display: flex; }
+}
+@container (max-width: 520px) {
+  .desk-bar-row { flex-wrap: wrap; }
+  .desk-bar-hint { white-space: normal; }
+  .desk-bar .desk-bar-room { flex: 1 1 140px; max-width: none; }
+  .desk-bar-now { flex: 1 1 100%; order: 1; }
+  .desk-bar-waiting { order: 2; }
+  .desk-bar-actions { order: 3; }
+}
+@container (max-width: 400px) {
+  .desk-bar .desk-bar-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .desk-bar .desk-btn { padding: 0 10px; }
+}
+
 .panel > .desk-picker { padding: clamp(1.25rem, 3vw, 1.75rem); }
 
 /* ---- Today (dashboard) ---- */
