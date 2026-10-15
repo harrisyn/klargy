@@ -1,0 +1,1853 @@
+openapi: 3.1.0
+info:
+  title: Klargy Connect
+  version: 1.0.0
+  summary: The API an EMR (or any system that sends people into a queue) uses to work with Klargy.
+  description: |
+    Machine-readable companion to [Klargy Connect v1](./v1.md). Where the two
+    differ, v1.md and the server are right and this file is a bug.
+
+    Every call sends the integration's API key as `Authorization: Bearer
+    klg_live_…`. Errors are `{"error": "message"}`, with a machine-readable
+    `code` where listed. Each key may make 120 requests a minute; past that
+    Klargy answers 429 with `Retry-After`.
+
+    Klargy calls the EMR too: events go to the registered `webhookUrl`
+    (see `webhooks`) and patient lookups go to `lookupUrl` (the
+    `patient.lookup` webhook). Both are signed with the integration's
+    signing secret: `X-Webhook-Signature: sha256=<hex HMAC-SHA256(secret,
+    "<X-Webhook-Timestamp>.<raw body>")>`. Receivers reject timestamps more
+    than 5 minutes from their clock.
+
+    Within v1 every change is additive: fields and events are added, never
+    renamed or removed. Clients must ignore fields they don't know.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: https://{workspace}/api/v1/connect/v1
+    description: The organisation's Klargy address
+    variables:
+      workspace:
+        default: acme.klargy.com
+security:
+  - apiKey: []
+tags:
+  - name: Integration
+    description: Key check, self-registration, catalogue and mappings (phase 1)
+  - name: Entries
+    description: Patients and queue entries addressed by the EMR's ids (phases 2, 4, 5)
+  - name: Desk
+    description: The staff desk inside the EMR (phase 3)
+  - name: Journey
+    description: Appointments, analytics and pausing a service (phase 5)
+
+paths:
+  /me:
+    get:
+      tags: [Integration]
+      operationId: getMe
+      summary: Check the key
+      description: Used by the EMR's "Test connection" button. Needs no scope.
+      responses:
+        '200':
+          description: The key works.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /integration:
+    put:
+      tags: [Integration]
+      operationId: registerIntegration
+      summary: Self-registration
+      description: |
+        Scope `integration:write`. Tells Klargy where to send events and which
+        origins may embed the desk. Idempotent: call it on every save of the
+        EMR's settings. Klargy creates (or updates) one webhook endpoint owned
+        by the integration, subscribed to every event; `signingSecret` is its
+        secret and is returned on every call. Leaving `lookupUrl` out turns
+        patient lookup off.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterIntegrationRequest' }
+      responses:
+        '200':
+          description: Registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegisterIntegrationResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /catalog:
+    put:
+      tags: [Integration]
+      operationId: publishCatalog
+      summary: Publish the EMR's records
+      description: |
+        Scope `catalog:write`. Replaces the previous catalogue. All arrays are
+        optional; ids must be unique within their array. At most 5,000 items
+        per array and 1 MB per request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CatalogRequest' }
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogPublishResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413':
+          description: The body is over 1 MB.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    get:
+      tags: [Integration]
+      operationId: getCatalog
+      summary: Klargy's own records
+      description: Scope `catalog:read`. Klargy's locations, services and service points, each with the EMR record it is mapped to.
+      responses:
+        '200':
+          description: Klargy's catalogue.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KlargyCatalog' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /mappings:
+    get:
+      tags: [Integration]
+      operationId: getMappings
+      summary: Cross-references
+      description: |
+        Scope `catalog:read`. Without `resourceType`, the admin's mappings
+        (location, service, service_point, staff). With it, just that type,
+        including the references Connect calls create (patient, visit,
+        encounter, appointment).
+      parameters:
+        - name: resourceType
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ResourceType' }
+      responses:
+        '200':
+          description: Mappings, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mappings]
+                properties:
+                  mappings:
+                    type: array
+                    items: { $ref: '#/components/schemas/Mapping' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /patients/{patientId}:
+    put:
+      tags: [Entries]
+      operationId: putPatient
+      summary: Create or update a patient
+      description: |
+        Scope `patients:write`. Creates or updates the Klargy patient for an
+        EMR patient id. `POST /entries` does the same inline, so this is only
+        needed to update details. A field left out is left as it is;
+        `"phone": null` clears the phone. `identifiers` are merged into what
+        Klargy holds; `email` is kept with them (Klargy never emails or signs
+        in these patients).
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          description: The EMR's patient id.
+          schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PatientInput' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PutPatientResponse' }
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PutPatientResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /entries:
+    post:
+      tags: [Entries]
+      operationId: createEntry
+      summary: Issue a ticket for a visit
+      description: |
+        Scope `entries:write`. Issues a ticket in today's queue (location
+        time) for the service. One EMR visit is one Klargy journey; a new
+        entry for a visit that already has a journey joins it. If the visit
+        already has an open (waiting or serving) entry for the service, that
+        entry is returned with 200 instead.
+
+        A new ticket (201) sends the patient Klargy's "you've joined" message
+        with their `statusUrl`; a 200 or a replayed request does not. With
+        `refs.appointment` naming a booked appointment Klargy knows, the
+        appointment is checked in (`appointment.checked_in`).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateEntryRequest' }
+      responses:
+        '200':
+          description: The visit's open entry for this service (nothing new was issued), or a replay.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryResponse' }
+        '201':
+          description: A new ticket.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            Missing scope or plan feature (no `code`), or `LIMIT_REACHED` when
+            the plan's queue limits are reached (with `limitType`, `current`,
+            `limit`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`SERVICE_NOT_MAPPED`: `service` has no match.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            `QUEUE_CLOSED` (today's queue is paused or closed, the service is
+            switched off or the organisation is paused),
+            `VISIT_PATIENT_MISMATCH` (`refs.visit` belongs to another
+            `refs.patient`), `ALREADY_IN_QUEUE` (with `entry`: the patient's
+            open ticket in that queue under another visit) or
+            `IDEMPOTENCY_IN_PROGRESS`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`PATIENT_REQUIRED` (`patient` missing for a patient Klargy hasn''t seen) or `IDEMPOTENCY_KEY_REUSED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    get:
+      tags: [Entries]
+      operationId: listEntries
+      summary: Entries changed since a time
+      description: |
+        Scope `entries:read`. Entries in the organisation changed after
+        `updatedSince` (not only ones this integration created), oldest change
+        first, at most 500. For catching up after downtime: call again with
+        `nextUpdatedSince` until `entries` is empty. A full page doesn't split
+        entries changed at the same instant (unless more than 500 did); the
+        same entry can appear on two pages if it changed again in between.
+        An unknown visit gives an empty list.
+      parameters:
+        - name: updatedSince
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: visit
+          in: query
+          required: false
+          description: Only this EMR visit's entries.
+          schema: { type: string }
+      responses:
+        '200':
+          description: A page of entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries, nextUpdatedSince]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/Entry' }
+                  nextUpdatedSince: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /entries/by-ref/{type}/{id}:
+    get:
+      tags: [Entries]
+      operationId: getEntryByRef
+      summary: The entry a by-ref action would move
+      description: |
+        Scope `entries:read`. For `visit`: the entry being served, else the
+        oldest waiting (among `service`'s entries when given). An encounter
+        or entry is returned whatever its status. `position` is fresh.
+      parameters:
+        - $ref: '#/components/parameters/RefType'
+        - $ref: '#/components/parameters/RefId'
+        - name: service
+          in: query
+          required: false
+          description: For `visit`, choose among this service's entries (EMR or Klargy id). Ignored otherwise.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The entry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`NO_OPEN_ENTRY` (a visit with nothing waiting or being served, or unknown), `ENTRY_NOT_FOUND` (unknown encounter or entry) or `SERVICE_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /entries/by-ref/{type}/{id}/{action}:
+    post:
+      tags: [Entries]
+      operationId: moveEntryByRef
+      summary: Call, complete, cancel or mark as not here
+      description: |
+        Scope `entries:write`. Moves a ticket from the EMR side.
+
+        | action | status | from |
+        |---|---|---|
+        | `call` | `SERVING` | `WAITING` |
+        | `complete` | `SERVED` | `WAITING`, `SERVING` (runs the service's flow) |
+        | `cancel` | `CANCELLED` | `WAITING`, `SERVING` |
+        | `no-show` | `NO_SHOW` | `WAITING`, `SERVING` |
+
+        Moving an entry to the status it already has returns 200 and changes
+        nothing, so retries are safe. Send an `Idempotency-Key` (or address
+        the entry by `encounter` or `entry`) when retrying a `visit` call:
+        after a `complete`, the visit's open entry may be the next ticket a
+        service flow issued. `transfer` and `priority` are described on their
+        own paths.
+      parameters:
+        - $ref: '#/components/parameters/RefType'
+        - $ref: '#/components/parameters/RefId'
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [call, complete, cancel, no-show]
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntryActionRequest' }
+      responses:
+        '200':
+          description: The entry after the move.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`ENTRY_NOT_FOUND`, `NO_OPEN_ENTRY`, `SERVICE_NOT_MAPPED` (the `service` selector) or `SERVICE_POINT_NOT_MAPPED` (`call` with an unknown `servicePoint`).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`INVALID_TRANSITION` (with the entry''s current `status`, except when someone moved it first) or `IDEMPOTENCY_IN_PROGRESS`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`INVALID_SERVICE_POINT` (that service point doesn''t serve the entry''s service) or `IDEMPOTENCY_KEY_REUSED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /entries/by-ref/{type}/{id}/transfer:
+    post:
+      tags: [Entries]
+      operationId: transferEntryByRef
+      summary: Send the patient on to another service
+      description: |
+        Scope `entries:write`. Completes the entry (`SERVED`) and issues a
+        ticket in today's queue of `to`, in the same visit (`previousEntryId`
+        is the completed entry). Sends `entry.transferred` and the "you've
+        joined" message for the new ticket; the completed entry gets no
+        `entry.served`. If the visit already has an open entry in `to`, the
+        answer is 200 with that entry and `from: null`, and nothing changes.
+      parameters:
+        - $ref: '#/components/parameters/RefType'
+        - $ref: '#/components/parameters/RefId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferRequest' }
+      responses:
+        '200':
+          description: The visit was already in `to`.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferResponse' }
+        '201':
+          description: Transferred.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Missing scope or plan feature, or `LIMIT_REACHED`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`SERVICE_NOT_MAPPED` (`to` or `service`), `NO_OPEN_ENTRY` or `ENTRY_NOT_FOUND`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`QUEUE_CLOSED` (`to` isn''t taking anyone), `INVALID_TRANSITION`, `ALREADY_IN_QUEUE` (with `entry`) or `IDEMPOTENCY_IN_PROGRESS`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`IDEMPOTENCY_KEY_REUSED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /entries/by-ref/{type}/{id}/priority:
+    post:
+      tags: [Entries]
+      operationId: setEntryPriorityByRef
+      summary: Set the open entry's priority
+      description: |
+        Scope `entries:write`. Higher is called first; the line, lobby
+        screens and "almost your turn" messages update straight away. Sends
+        `entry.priority_changed`. The same value returns 200 and sends
+        nothing.
+      parameters:
+        - $ref: '#/components/parameters/RefType'
+        - $ref: '#/components/parameters/RefId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PriorityRequest' }
+      responses:
+        '200':
+          description: The entry.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`NO_OPEN_ENTRY`, `ENTRY_NOT_FOUND` or `SERVICE_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`INVALID_TRANSITION` (the entry isn''t waiting or being served) or `IDEMPOTENCY_IN_PROGRESS`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`IDEMPOTENCY_KEY_REUSED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /desk/launch:
+    post:
+      tags: [Desk]
+      operationId: launchDesk
+      summary: One-time desk URL for a practitioner
+      description: |
+        Scope `desk:launch`. Called by the EMR's server for the practitioner
+        signed in to it. Klargy finds the staff member by their `staff`
+        mapping, else by email among the organisation's active staff (and
+        records the mapping), else registers them as service staff. The code
+        in `url` works once, within 60 seconds: load it in an iframe straight
+        away. The desk then talks only to `returnOrigin` (see the desk
+        protocol in v1.md section 6).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeskLaunchRequest' }
+      responses:
+        '201':
+          description: Launch URL.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeskLaunchResponse' }
+        '400':
+          description: A missing or malformed field, or `ORIGIN_NOT_ALLOWED` (`returnOrigin` isn't one of the integration's `embedOrigins`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Missing scope or plan feature, `STAFF_INACTIVE`, or `LIMIT_REACHED` (`limitType` `users`) when no staff seat is left for a new registration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`SERVICE_POINT_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /appointments/{appointmentRef}:
+    put:
+      tags: [Journey]
+      operationId: putAppointment
+      summary: Create or update an appointment
+      description: |
+        Scope `appointments:write`. Mirrors the EMR's appointment in Klargy.
+        Booked appointments get Klargy's usual reminder. Sends
+        `appointment.created`, `appointment.rescheduled` (start time or
+        service changed) or `appointment.cancelled`. An appointment Klargy has
+        already checked in stays checked in while the EMR says `booked`.
+      parameters:
+        - name: appointmentRef
+          in: path
+          required: true
+          description: The EMR's appointment id.
+          schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppointmentRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppointmentResponse' }
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppointmentResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`SERVICE_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`PATIENT_REQUIRED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /analytics:
+    get:
+      tags: [Journey]
+      operationId: getAnalytics
+      summary: Queue numbers
+      description: |
+        Scope `analytics:read`. Without `from` and `to`, today in the
+        location's timezone (the service's location, else the location, else
+        the organisation's first). With only `to`, from the start of that
+        day; with only `from`, up to now. At most 90 days, counted by when
+        people joined. `live` is now, across today's queues. `services` lists
+        services with someone joining in the range, busiest first.
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
+        - name: location
+          in: query
+          required: false
+          description: EMR or Klargy location id.
+          schema: { type: string }
+        - name: service
+          in: query
+          required: false
+          description: EMR or Klargy service id.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Numbers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Analytics' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`SERVICE_NOT_MAPPED` or `LOCATION_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /services/{service}/status:
+    post:
+      tags: [Journey]
+      operationId: setServiceStatus
+      summary: Pause or reopen today's queue
+      description: |
+        Scope `entries:write`. While paused nobody new joins (`POST /entries`
+        and `transfer` answer 409 `QUEUE_CLOSED`). On a pause everyone
+        waiting gets one message: `message`, else a default. Asking for the
+        status the queue already has returns `changed: false` and does
+        nothing else. Sends `queue.paused` / `queue.resumed`.
+      parameters:
+        - name: service
+          in: path
+          required: true
+          description: EMR or Klargy service id.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceStatusRequest' }
+      responses:
+        '200':
+          description: The queue's status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceStatusResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`SERVICE_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+webhooks:
+  entry.joined: { $ref: '#/components/pathItems/EntryEvent' }
+  entry.called: { $ref: '#/components/pathItems/EntryEvent' }
+  entry.served: { $ref: '#/components/pathItems/EntryEvent' }
+  entry.cancelled: { $ref: '#/components/pathItems/EntryEvent' }
+  entry.no_show: { $ref: '#/components/pathItems/EntryEvent' }
+  entry.transferred: { $ref: '#/components/pathItems/EntryTransferredEvent' }
+  entry.priority_changed: { $ref: '#/components/pathItems/EntryPriorityChangedEvent' }
+  queue.paused: { $ref: '#/components/pathItems/QueueStatusEvent' }
+  queue.resumed: { $ref: '#/components/pathItems/QueueStatusEvent' }
+  appointment.created: { $ref: '#/components/pathItems/AppointmentEvent' }
+  appointment.rescheduled: { $ref: '#/components/pathItems/AppointmentEvent' }
+  appointment.cancelled: { $ref: '#/components/pathItems/AppointmentEvent' }
+  appointment.checked_in: { $ref: '#/components/pathItems/AppointmentCheckedInEvent' }
+  journey.completed: { $ref: '#/components/pathItems/JourneyCompletedEvent' }
+  servicepoint.opened: { $ref: '#/components/pathItems/ServicePointEvent' }
+  servicepoint.closed: { $ref: '#/components/pathItems/ServicePointEvent' }
+  ping: { $ref: '#/components/pathItems/PingEvent' }
+  patient.lookup:
+    post:
+      summary: Klargy asks the EMR who a patient is
+      operationId: onPatientLookup
+      description: |
+        Sent to the registered `lookupUrl`, signed like a webhook with the
+        same secret and `X-Webhook-Event: patient.lookup` (a new
+        `X-Webhook-Id` per request). Klargy waits 5 seconds, does not follow
+        redirects and never retries inside someone's request. Anything but a
+        2xx, or no answer in time, is a failed lookup.
+
+        In `public` context Klargy keeps only `matched` and
+        `patient.firstName`, whatever it is sent, and never asks by
+        `patientRef`.
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - name: X-Webhook-Event
+          in: header
+          required: true
+          schema: { const: patient.lookup }
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LookupRequest' }
+      responses:
+        '200':
+          description: The answer.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/StaffLookupResponse'
+                  - $ref: '#/components/schemas/PublicLookupResponse'
+        '400':
+          description: A bad body.
+        '401':
+          description: A bad, missing or stale (over 5 minutes) signature.
+        '404':
+          description: An unknown or switched-off connection.
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: klg_live_ followed by 40 base62 characters
+      description: The integration's API key, shown once when it is created or rotated in Klargy.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        At most 255 characters. The same key within 24 hours returns the
+        first successful (2xx) response, with `Idempotent-Replayed: true`.
+        Failures aren't kept, so a failed request can be retried with the
+        same key. Reusing a key for a different request is 422
+        `IDEMPOTENCY_KEY_REUSED`; a retry while the first is still running is
+        409 `IDEMPOTENCY_IN_PROGRESS`.
+      schema: { type: string, maxLength: 255 }
+    RefType:
+      name: type
+      in: path
+      required: true
+      description: '`visit` (the visit''s open entry: the one being served, else the oldest waiting), `encounter` or `entry` (a Klargy entry id).'
+      schema:
+        type: string
+        enum: [visit, encounter, entry]
+    RefId:
+      name: id
+      in: path
+      required: true
+      description: The EMR visit or encounter id, or the Klargy entry id.
+      schema: { type: string, maxLength: 200 }
+    WebhookId:
+      name: X-Webhook-Id
+      in: header
+      required: true
+      description: The delivery id. A retry reuses it; de-duplicate on it.
+      schema: { type: string }
+    WebhookEvent:
+      name: X-Webhook-Event
+      in: header
+      required: true
+      schema: { type: string }
+    WebhookTimestamp:
+      name: X-Webhook-Timestamp
+      in: header
+      required: true
+      description: Unix seconds. Reject a timestamp more than 5 minutes from your clock.
+      schema: { type: string, pattern: '^[0-9]+$' }
+    WebhookSignature:
+      name: X-Webhook-Signature
+      in: header
+      required: true
+      description: '`sha256=` followed by the hex HMAC-SHA256 of `"<X-Webhook-Timestamp>.<raw body>"` keyed with the signing secret.'
+      schema: { type: string, pattern: '^sha256=[0-9a-f]{64}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response was replayed for a repeated Idempotency-Key.'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    BadRequest:
+      description: A missing or malformed field (no `code`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: A missing, unknown or revoked key.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: The key lacks the scope, or the organisation's plan lacks EMR connections (`feature`:`emrIntegration`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: Over 120 requests a minute for this key.
+      headers:
+        Retry-After:
+          description: Seconds to wait.
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  pathItems:
+    EntryEvent:
+      post:
+        operationId: onEntryEvent
+        summary: A ticket was issued, called, served, cancelled or marked as not here
+        description: |
+          `entry.joined`, `entry.called`, `entry.served`, `entry.cancelled` and
+          `entry.no_show`. Ignore events whose `origin.integrationId` is your own
+          integration id: they echo your own calls.
+        parameters:
+          - $ref: '#/components/parameters/WebhookId'
+          - $ref: '#/components/parameters/WebhookEvent'
+          - $ref: '#/components/parameters/WebhookTimestamp'
+          - $ref: '#/components/parameters/WebhookSignature'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EventEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/EntryEventData' }
+        responses:
+          '2XX':
+            description: Acknowledged. Anything else is retried 6 times over about 14 hours.
+    EntryTransferredEvent:
+      post:
+        operationId: onEntryTransferredEvent
+        summary: A patient was sent on to another service
+        description: |
+          The new ticket, with where it came from. The completed entry gets no
+          `entry.served`.
+        parameters:
+          - $ref: '#/components/parameters/WebhookId'
+          - $ref: '#/components/parameters/WebhookEvent'
+          - $ref: '#/components/parameters/WebhookTimestamp'
+          - $ref: '#/components/parameters/WebhookSignature'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EventEnvelope'
+                  - type: object
+                    properties:
+                      event: { const: entry.transferred }
+                      data: { $ref: '#/components/schemas/EntryTransferredData' }
+        responses:
+          '2XX':
+            description: Acknowledged. Anything else is retried 6 times over about 14 hours.
+    EntryPriorityChangedEvent:
+      post:
+        operationId: onEntryPriorityChangedEvent
+        summary: An entry's priority changed
+        parameters:
+          - $ref: '#/components/parameters/WebhookId'
+          - $ref: '#/components/parameters/WebhookEvent'
+          - $ref: '#/components/parameters/WebhookTimestamp'
+          - $ref: '#/components/parameters/WebhookSignature'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EventEnvelope'
+                  - type: object
+                    properties:
+                      event: { const: entry.priority_changed }
+                      data: { $ref: '#/components/schemas/EntryPriorityChangedData' }
+        responses:
+          '2XX':
+            description: Acknowledged. Anything else is retried 6 times over about 14 hours.
+    AppointmentCheckedInEvent:
+      post:
+        operationId: onAppointmentCheckedInEvent
+        summary: A ticket issued for a booked appointment checked it in
+        parameters:
+          - $ref: '#/components/parameters/WebhookId'
+          - $ref: '#/components/parameters/WebhookEvent'
+          - $ref: '#/components/parameters/WebhookTimestamp'
+          - $ref: '#/components/parameters/WebhookSignature'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EventEnvelope'
+                  - type: object
+                    properties:
+                      event: { const: appointment.checked_in }
+                      data: { $ref: '#/components/schemas/AppointmentCheckedInData' }
+        responses:
+          '2XX':
+            description: Acknowledged. Anything else is retried 6 times over about 14 hours.
+    JourneyCompletedEvent:
+      post:
+        operationId: onJourneyCompletedEvent
+        summary: Nothing in a visit is waiting or being served any more
+        description: |
+          Sent once per closing; if the journey later gets another entry and
+          closes again, it is sent again.
+        parameters:
+          - $ref: '#/components/parameters/WebhookId'
+          - $ref: '#/components/parameters/WebhookEvent'
+          - $ref: '#/components/parameters/WebhookTimestamp'
+          - $ref: '#/components/parameters/WebhookSignature'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EventEnvelope'
+                  - type: object
+                    properties:
+                      event: { const: journey.completed }
+                      data: { $ref: '#/components/schemas/JourneyCompletedData' }
+        responses:
+          '2XX':
+            description: Acknowledged. Anything else is retried 6 times over about 14 hours.
+    QueueStatusEvent:
+      post:
+        operationId: onQueueStatusEvent
+        summary: A queue was paused or reopened
+        description: |
+          `queue.paused` and `queue.resumed`, whether by
+          `POST /services/{service}/status` or by staff in Klargy. Closing a queue
+          for the day sends neither.
+        parameters:
+          - $ref: '#/components/parameters/WebhookId'
+          - $ref: '#/components/parameters/WebhookEvent'
+          - $ref: '#/components/parameters/WebhookTimestamp'
+          - $ref: '#/components/parameters/WebhookSignature'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EventEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/QueueStatusData' }
+        responses:
+          '2XX':
+            description: Acknowledged. Anything else is retried 6 times over about 14 hours.
+    AppointmentEvent:
+      post:
+        operationId: onAppointmentEvent
+        summary: An appointment was created, rescheduled or cancelled
+        description: |
+          `appointment.created`, `appointment.rescheduled` and
+          `appointment.cancelled`.
+        parameters:
+          - $ref: '#/components/parameters/WebhookId'
+          - $ref: '#/components/parameters/WebhookEvent'
+          - $ref: '#/components/parameters/WebhookTimestamp'
+          - $ref: '#/components/parameters/WebhookSignature'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EventEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AppointmentEventData' }
+        responses:
+          '2XX':
+            description: Acknowledged. Anything else is retried 6 times over about 14 hours.
+    ServicePointEvent:
+      post:
+        operationId: onServicePointEvent
+        summary: Someone signed in to or left a room
+        description: |
+          `servicepoint.opened` when someone signs in to a desk (going back to the
+          desk you are already at sends nothing; taking over someone else's sends
+          `closed` for them first). `servicepoint.closed` when someone leaves a
+          desk, an admin clears it, or an admin switches it off while someone is
+          signed in.
+        parameters:
+          - $ref: '#/components/parameters/WebhookId'
+          - $ref: '#/components/parameters/WebhookEvent'
+          - $ref: '#/components/parameters/WebhookTimestamp'
+          - $ref: '#/components/parameters/WebhookSignature'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EventEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ServicePointData' }
+        responses:
+          '2XX':
+            description: Acknowledged. Anything else is retried 6 times over about 14 hours.
+    PingEvent:
+      post:
+        operationId: onPingEvent
+        summary: The admin's "Send test" button
+        parameters:
+          - $ref: '#/components/parameters/WebhookId'
+          - $ref: '#/components/parameters/WebhookEvent'
+          - $ref: '#/components/parameters/WebhookTimestamp'
+          - $ref: '#/components/parameters/WebhookSignature'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EventEnvelope'
+                  - type: object
+                    properties:
+                      event: { const: ping }
+                      data: { $ref: '#/components/schemas/PingData' }
+        responses:
+          '2XX':
+            description: Acknowledged. Anything else is retried 6 times over about 14 hours.
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        code:
+          type: string
+          description: Present on the refusals listed with each call.
+          examples: [SERVICE_NOT_MAPPED]
+          enum:
+            - SERVICE_NOT_MAPPED
+            - QUEUE_CLOSED
+            - PATIENT_REQUIRED
+            - LIMIT_REACHED
+            - VISIT_PATIENT_MISMATCH
+            - ALREADY_IN_QUEUE
+            - IDEMPOTENCY_KEY_REUSED
+            - IDEMPOTENCY_IN_PROGRESS
+            - ENTRY_NOT_FOUND
+            - NO_OPEN_ENTRY
+            - INVALID_TRANSITION
+            - SERVICE_POINT_NOT_MAPPED
+            - INVALID_SERVICE_POINT
+            - NOT_FOUND
+            - ORIGIN_NOT_ALLOWED
+            - STAFF_INACTIVE
+            - LOCATION_NOT_MAPPED
+        limitType: { type: string, description: 'LIMIT_REACHED' }
+        current: { type: integer, description: 'LIMIT_REACHED' }
+        limit: { type: [integer, 'null'], description: 'LIMIT_REACHED' }
+        entry:
+          $ref: '#/components/schemas/Entry'
+          description: 'ALREADY_IN_QUEUE: the patient''s open ticket in that queue.'
+        status:
+          $ref: '#/components/schemas/EntryStatus'
+          description: 'INVALID_TRANSITION: the entry''s current status.'
+        feature: { type: string, description: 'Plan refusal: the missing feature (emrIntegration).' }
+
+    Scope:
+      type: string
+      enum:
+        - integration:write
+        - catalog:read
+        - catalog:write
+        - patients:write
+        - entries:read
+        - entries:write
+        - desk:launch
+        - appointments:write
+        - analytics:read
+
+    Me:
+      type: object
+      required: [contract, organization, integration]
+      properties:
+        contract: { type: string, const: klargy-connect/v1 }
+        organization:
+          type: object
+          required: [id, name, slug]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            slug: { type: [string, 'null'] }
+        integration:
+          type: object
+          required: [id, name, status, scopes, registered, catalogPublishedAt]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            status: { type: string, enum: [ACTIVE, REVOKED] }
+            scopes:
+              type: array
+              items: { $ref: '#/components/schemas/Scope' }
+            registered: { type: boolean, description: '`PUT /integration` has been called.' }
+            catalogPublishedAt: { type: [string, 'null'], format: date-time }
+
+    RegisterIntegrationRequest:
+      type: object
+      required: [webhookUrl]
+      properties:
+        system:
+          type: object
+          properties:
+            name: { type: string, maxLength: 200 }
+            version: { type: string, maxLength: 200 }
+        webhookUrl:
+          type: string
+          format: uri
+          maxLength: 200
+          description: Public `https` URL (plain `http` is accepted outside production).
+        lookupUrl:
+          type: [string, 'null']
+          format: uri
+          maxLength: 200
+          description: Turns on patient lookup. Leaving it out turns it off.
+        embedOrigins:
+          type: array
+          maxItems: 10
+          description: Origins that may frame the desk (https; http outside production). Full URLs are reduced to their origin.
+          items: { type: string }
+
+    RegisterIntegrationResponse:
+      type: object
+      required: [integrationId, signingSecret, webhookEvents]
+      properties:
+        integrationId: { type: string }
+        signingSecret: { type: string, description: '`whsec_…`. Rotating the API key does not change it.' }
+        webhookEvents:
+          type: array
+          items: { type: string }
+
+    CatalogRequest:
+      type: object
+      properties:
+        locations:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/CatalogNamed' }
+        services:
+          type: array
+          maxItems: 5000
+          items:
+            allOf:
+              - $ref: '#/components/schemas/CatalogNamed'
+              - type: object
+                properties:
+                  locationId: { type: [string, 'null'] }
+                  kind:
+                    type: [string, 'null']
+                    description: '`clinic`, `lab`, `imaging`, `pharmacy` or `cashier` (any other text is kept).'
+        servicePoints:
+          type: array
+          maxItems: 5000
+          items:
+            allOf:
+              - $ref: '#/components/schemas/CatalogNamed'
+              - type: object
+                properties:
+                  locationId: { type: [string, 'null'] }
+                  kind: { type: [string, 'null'] }
+        practitioners:
+          type: array
+          maxItems: 5000
+          items:
+            allOf:
+              - $ref: '#/components/schemas/CatalogNamed'
+              - type: object
+                properties:
+                  email: { type: [string, 'null'] }
+        registrationFields:
+          type: array
+          maxItems: 5000
+          items:
+            type: object
+            required: [key]
+            properties:
+              key: { type: string, maxLength: 200 }
+              label: { type: [string, 'null'] }
+              required: { type: boolean, default: false }
+              type: { type: [string, 'null'], default: text }
+
+    CatalogNamed:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, maxLength: 200, description: 'The EMR''s id, unique within its array.' }
+        name: { type: string, maxLength: 200 }
+
+    CatalogPublishResponse:
+      type: object
+      required: [received]
+      properties:
+        received:
+          type: object
+          required: [locations, services, servicePoints, practitioners, registrationFields]
+          properties:
+            locations: { type: integer }
+            services: { type: integer }
+            servicePoints: { type: integer }
+            practitioners: { type: integer }
+            registrationFields: { type: integer }
+
+    KlargyCatalog:
+      type: object
+      required: [locations, services, servicePoints]
+      properties:
+        locations:
+          type: array
+          items:
+            type: object
+            required: [id, name, externalId]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              externalId: { type: [string, 'null'] }
+        services:
+          type: array
+          items:
+            type: object
+            required: [id, name, locationId, externalId]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              locationId: { type: string }
+              externalId: { type: [string, 'null'] }
+        servicePoints:
+          type: array
+          items:
+            type: object
+            required: [id, name, type, externalId]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              type:
+                type: string
+                enum: [RECEPTION, TRIAGE, CONSULTATION, CASHIER, PHARMACY, LAB, IMAGING, OTHER]
+              externalId: { type: [string, 'null'] }
+
+    ResourceType:
+      type: string
+      enum: [location, service, service_point, staff, patient, visit, encounter, appointment]
+
+    Mapping:
+      type: object
+      required: [resourceType, klargyId, externalId]
+      properties:
+        resourceType: { $ref: '#/components/schemas/ResourceType' }
+        klargyId: { type: string }
+        externalId: { type: string }
+
+    PatientInput:
+      type: object
+      required: [firstName, lastName]
+      properties:
+        firstName: { type: string, maxLength: 200 }
+        lastName: { type: string, maxLength: 200 }
+        phone: { type: [string, 'null'], maxLength: 200 }
+        email: { type: [string, 'null'], format: email }
+        identifiers:
+          type: object
+          maxProperties: 20
+          description: Merged into what Klargy holds. Keys up to 50 characters; empty values are skipped.
+          additionalProperties:
+            type: [string, number, 'null']
+
+    PutPatientResponse:
+      type: object
+      required: [patientId, klargyId, created]
+      properties:
+        patientId: { type: string, description: 'The EMR''s id.' }
+        klargyId: { type: string }
+        created: { type: boolean }
+
+    CreateEntryRequest:
+      type: object
+      required: [refs, service]
+      properties:
+        refs:
+          type: object
+          required: [patient, visit]
+          properties:
+            patient: { type: string, maxLength: 200 }
+            visit: { type: string, maxLength: 200 }
+            appointment:
+              type: [string, 'null']
+              description: An appointment Klargy knows that is still booked is checked in.
+            encounter:
+              type: [string, 'null']
+              description: Links the entry to this encounter (an encounter belongs to one entry; linking it again moves it).
+        patient:
+          description: Required the first time Klargy sees `refs.patient`; later it updates the details.
+          oneOf:
+            - $ref: '#/components/schemas/PatientInput'
+            - type: 'null'
+        service:
+          type: string
+          description: The EMR id of a catalogue service the admin has matched, or a Klargy service id.
+        priority: { type: integer, minimum: 0, maximum: 100, default: 0, description: 'Higher is called first.' }
+        notes: { type: [string, 'null'], maxLength: 1000, description: 'Shown to staff.' }
+
+    EntryActionRequest:
+      type: object
+      properties:
+        service: { type: string, description: 'For `visit`: choose among this service''s entries (EMR or Klargy id).' }
+        encounter: { type: string, description: 'Links the entry to this encounter, even when nothing else changes.' }
+        servicePoint:
+          type: string
+          description: '`call` only: EMR or Klargy service point id. Picks its desk for the entry''s service where `staff` is signed in, else a free one, else the first.'
+        staff: { type: string, description: 'EMR practitioner id of whoever is acting; recorded when mapped, else ignored.' }
+        reason: { type: string, description: 'Recorded and sent in the event.' }
+
+    TransferRequest:
+      type: object
+      required: [to]
+      properties:
+        to: { type: string, description: 'EMR or Klargy service id.' }
+        service: { type: string, description: 'Narrows the visit''s entry, as for the other actions.' }
+        priority: { type: integer, minimum: 0, maximum: 100, description: 'Defaults to the completed entry''s.' }
+        encounter: { type: string, description: 'Linked to the new ticket.' }
+        staff: { type: string }
+        reason: { type: string }
+
+    PriorityRequest:
+      type: object
+      required: [priority]
+      properties:
+        priority: { type: integer, minimum: 0, maximum: 100 }
+        service: { type: string }
+        encounter: { type: string }
+        staff: { type: string }
+        reason: { type: string }
+
+    EntryResponse:
+      type: object
+      required: [entry]
+      properties:
+        entry: { $ref: '#/components/schemas/Entry' }
+
+    TransferResponse:
+      type: object
+      required: [entry, from]
+      properties:
+        entry: { $ref: '#/components/schemas/Entry' }
+        from:
+          description: The completed entry; null when the visit was already in `to`.
+          oneOf:
+            - $ref: '#/components/schemas/Entry'
+            - type: 'null'
+
+    EntryStatus:
+      type: string
+      enum: [WAITING, SERVING, SERVED, CANCELLED, NO_SHOW]
+
+    NamedRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+
+    EntryPatient:
+      type: object
+      required: [id, firstName, lastName, phone]
+      properties:
+        id: { type: string, description: 'Klargy''s id.' }
+        firstName: { type: string }
+        lastName: { type: string }
+        phone: { type: [string, 'null'] }
+        identityData:
+          type: [object, 'null']
+          description: The identifiers Klargy holds.
+          additionalProperties: true
+
+    EntryRefs:
+      type: object
+      description: The EMR's own ids, or null. `staff` is the person who acted, in events; always null in Connect responses.
+      properties:
+        patient: { type: [string, 'null'] }
+        visit: { type: [string, 'null'] }
+        encounter: { type: [string, 'null'] }
+        service: { type: [string, 'null'] }
+        location: { type: [string, 'null'] }
+        servicePoint: { type: [string, 'null'] }
+        staff: { type: [string, 'null'] }
+        appointment: { type: [string, 'null'], description: 'Appointment events.' }
+
+    EntryBase:
+      type: object
+      required:
+        - entryId
+        - ticketNumber
+        - status
+        - queueId
+        - service
+        - location
+        - servicePoint
+        - journeyId
+        - previousEntryId
+        - joinedAt
+        - calledAt
+        - servedAt
+        - completedAt
+        - patient
+        - statusUrl
+        - position
+      properties:
+        entryId: { type: string }
+        ticketNumber: { type: string, examples: [G012] }
+        status: { $ref: '#/components/schemas/EntryStatus' }
+        queueId: { type: string }
+        service: { $ref: '#/components/schemas/NamedRef' }
+        location: { $ref: '#/components/schemas/NamedRef' }
+        servicePoint:
+          description: Set on `entry.called` and later while served at one.
+          oneOf:
+            - $ref: '#/components/schemas/NamedRef'
+            - type: 'null'
+        journeyId: { type: [string, 'null'], description: 'Klargy''s journey (one per EMR visit).' }
+        previousEntryId: { type: [string, 'null'], description: 'The entry this one was transferred from.' }
+        joinedAt: { type: string, format: date-time }
+        calledAt: { type: [string, 'null'], format: date-time }
+        servedAt: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        patient: { $ref: '#/components/schemas/EntryPatient' }
+        statusUrl:
+          type: string
+          format: uri
+          description: The patient's live status page. Safe to show or send to the patient; needs no sign-in.
+        position:
+          type: [integer, 'null']
+          description: Place in line (1 = next) while WAITING, when the object was made; null otherwise.
+
+    Entry:
+      description: The entry object (Connect responses and desk messages). Webhook `data` without `origin`.
+      allOf:
+        - $ref: '#/components/schemas/EntryBase'
+        - type: object
+          required: [refs]
+          properties:
+            refs: { $ref: '#/components/schemas/EntryRefs' }
+
+    Origin:
+      type: object
+      required: [type, integrationId]
+      description: Who caused the event. Ignore events whose `integrationId` is your own integration's id (they echo your calls).
+      properties:
+        type: { type: string, enum: [staff, public, integration, system] }
+        integrationId: { type: [string, 'null'] }
+
+    EventEnvelope:
+      type: object
+      required: [id, event, createdAt, data]
+      properties:
+        id: { type: string, description: 'The delivery id (same as X-Webhook-Id).' }
+        event: { type: string }
+        createdAt: { type: string, format: date-time }
+        data: { type: object }
+
+    EntryEventData:
+      description: |
+        The entry object with `origin`. `refs` goes only to the integration's
+        own endpoint. A by-ref call with a `reason` adds `reason`; events may
+        carry other fields for their kind.
+      allOf:
+        - $ref: '#/components/schemas/EntryBase'
+        - type: object
+          required: [origin]
+          properties:
+            origin: { $ref: '#/components/schemas/Origin' }
+            refs: { $ref: '#/components/schemas/EntryRefs' }
+            reason: { type: string }
+
+    EntryTransferredData:
+      allOf:
+        - $ref: '#/components/schemas/EntryEventData'
+        - type: object
+          required: [fromEntryId, fromServiceId, toServiceId]
+          properties:
+            fromEntryId: { type: string }
+            fromServiceId: { type: string }
+            toServiceId: { type: string }
+
+    EntryPriorityChangedData:
+      allOf:
+        - $ref: '#/components/schemas/EntryEventData'
+        - type: object
+          required: [priority, previousPriority]
+          properties:
+            priority: { type: integer }
+            previousPriority: { type: integer }
+
+    AppointmentCheckedInData:
+      allOf:
+        - $ref: '#/components/schemas/EntryEventData'
+        - type: object
+          required: [appointmentId, patientId]
+          properties:
+            appointmentId: { type: string }
+            patientId: { type: string }
+
+    AppointmentEventData:
+      type: object
+      required: [appointmentId, origin]
+      description: |
+        Appointments synced through `PUT /appointments` carry `patientId`,
+        `serviceId`, `startTime`, `endTime`, `status` (and `fromStartTime`
+        when rescheduled). Appointments booked in Klargy carry `slotStart`
+        (`fromSlotStart` and `toSlotStart` when rescheduled). `refs` (with
+        `appointment`, `patient`, `service`, `location`, `staff` as known)
+        goes only to the integration's own endpoint.
+      properties:
+        appointmentId: { type: string }
+        patientId: { type: string }
+        serviceId: { type: string }
+        startTime: { type: string, format: date-time }
+        endTime: { type: [string, 'null'], format: date-time }
+        status: { type: string }
+        fromStartTime: { type: string, format: date-time }
+        slotStart: { type: string, format: date-time }
+        fromSlotStart: { type: string, format: date-time }
+        toSlotStart: { type: string, format: date-time }
+        origin: { $ref: '#/components/schemas/Origin' }
+        refs: { $ref: '#/components/schemas/EntryRefs' }
+
+    PingData:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+
+    JourneyCompletedData:
+      type: object
+      required: [journeyId, completedAt, totalDuration, patient, origin]
+      properties:
+        journeyId: { type: string }
+        completedAt: { type: string, format: date-time }
+        totalDuration: { type: integer, description: 'Minutes.' }
+        patient: { $ref: '#/components/schemas/EntryPatient' }
+        origin: { $ref: '#/components/schemas/Origin' }
+        refs:
+          type: object
+          properties:
+            patient: { type: [string, 'null'] }
+            visit: { type: [string, 'null'] }
+
+    ServicePointData:
+      type: object
+      required: [servicePoint, staff, origin]
+      properties:
+        servicePoint: { $ref: '#/components/schemas/NamedRef' }
+        staff:
+          $ref: '#/components/schemas/NamedRef'
+          description: Who sat at the desk.
+        origin: { $ref: '#/components/schemas/Origin' }
+        refs:
+          type: object
+          properties:
+            servicePoint: { type: [string, 'null'] }
+            staff: { type: [string, 'null'] }
+
+    QueueStatusData:
+      type: object
+      required: [queueId, service, location, reason, origin]
+      properties:
+        queueId: { type: string }
+        service: { $ref: '#/components/schemas/NamedRef' }
+        location: { $ref: '#/components/schemas/NamedRef' }
+        reason: { type: [string, 'null'] }
+        origin: { $ref: '#/components/schemas/Origin' }
+        refs:
+          type: object
+          properties:
+            service: { type: [string, 'null'] }
+            location: { type: [string, 'null'] }
+
+    DeskLaunchRequest:
+      type: object
+      required: [staff, returnOrigin]
+      properties:
+        staff:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string, maxLength: 200, description: 'EMR practitioner id.' }
+            name: { type: string, maxLength: 200 }
+            email: { type: [string, 'null'], format: email }
+        servicePoint:
+          type: [string, 'null']
+          description: EMR or Klargy service point id, preselected in the room picker.
+        returnOrigin:
+          type: string
+          description: One of the integration's `embedOrigins` (a full URL on that origin is accepted). The only origin the desk talks to.
+
+    DeskLaunchResponse:
+      type: object
+      required: [url, expiresAt, staff]
+      properties:
+        url: { type: string, format: uri, description: '`https://<workspace>/widget/desk?launch=<code>`' }
+        expiresAt: { type: string, format: date-time }
+        staff:
+          type: object
+          required: [klargyId, created]
+          properties:
+            klargyId: { type: string }
+            created: { type: boolean, description: 'This call registered the staff member.' }
+
+    AppointmentRequest:
+      type: object
+      required: [refs, service, startTime]
+      properties:
+        refs:
+          type: object
+          required: [patient]
+          properties:
+            patient: { type: string }
+            visit: { type: [string, 'null'], description: 'Accepted, not used yet.' }
+        patient:
+          oneOf:
+            - $ref: '#/components/schemas/PatientInput'
+            - type: 'null'
+        service: { type: string }
+        startTime: { type: string, format: date-time }
+        endTime: { type: [string, 'null'], format: date-time }
+        status:
+          type: string
+          enum: [booked, cancelled, no_show, completed]
+          default: booked
+        staff: { type: [string, 'null'], description: 'Accepted, not used yet.' }
+        notes: { type: [string, 'null'], maxLength: 1000 }
+
+    AppointmentResponse:
+      type: object
+      required: [appointment]
+      properties:
+        appointment:
+          type: object
+          required: [id, status, startTime, endTime, service, refs]
+          properties:
+            id: { type: string }
+            status: { type: string, description: '`booked`, `checked_in`, `cancelled`, `no_show` or `completed`.' }
+            startTime: { type: string, format: date-time }
+            endTime: { type: [string, 'null'], format: date-time }
+            service: { $ref: '#/components/schemas/NamedRef' }
+            refs:
+              type: object
+              properties:
+                appointment: { type: [string, 'null'] }
+                patient: { type: [string, 'null'] }
+                service: { type: [string, 'null'] }
+                location: { type: [string, 'null'] }
+
+    AnalyticsCounters:
+      type: object
+      required:
+        - joined
+        - served
+        - noShows
+        - cancelled
+        - noShowRatePct
+        - avgWaitMinutes
+        - medianWaitMinutes
+        - p90WaitMinutes
+        - avgServiceMinutes
+      properties:
+        joined: { type: integer }
+        served: { type: integer }
+        noShows: { type: integer }
+        cancelled: { type: integer }
+        noShowRatePct: { type: [number, 'null'] }
+        avgWaitMinutes: { type: [number, 'null'] }
+        medianWaitMinutes: { type: [number, 'null'] }
+        p90WaitMinutes: { type: [number, 'null'] }
+        avgServiceMinutes: { type: [number, 'null'] }
+
+    Analytics:
+      type: object
+      required: [from, to, overall, live, services]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        overall: { $ref: '#/components/schemas/AnalyticsCounters' }
+        live:
+          type: object
+          required: [waiting, serving, longestWaitMinutes]
+          properties:
+            waiting: { type: integer }
+            serving: { type: integer }
+            longestWaitMinutes: { type: integer }
+        services:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/AnalyticsCounters'
+              - type: object
+                required: [id, ref, name]
+                properties:
+                  id: { type: string, description: 'Klargy service id.' }
+                  ref: { type: [string, 'null'], description: 'EMR service id.' }
+                  name: { type: string }
+
+    ServiceStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [PAUSED, ACTIVE] }
+        reason: { type: [string, 'null'], maxLength: 200 }
+        message: { type: [string, 'null'], maxLength: 300, description: 'Sent to everyone waiting on a pause.' }
+
+    ServiceStatusResponse:
+      type: object
+      required: [queueId, status, changed, service, location, refs]
+      properties:
+        queueId: { type: string }
+        status: { type: string, enum: [ACTIVE, PAUSED, CLOSED] }
+        changed: { type: boolean }
+        service: { $ref: '#/components/schemas/NamedRef' }
+        location: { $ref: '#/components/schemas/NamedRef' }
+        refs:
+          type: object
+          properties:
+            service: { type: [string, 'null'] }
+            location: { type: [string, 'null'] }
+
+    LookupRequest:
+      type: object
+      required: [identifierType, identifier, context, locationRef]
+      properties:
+        identifierType:
+          type: string
+          enum: [mrNumber, memberNumber, phone, nationalId, passport, patientRef]
+          description: '`patientRef` is the EMR''s own patient id (staff only).'
+        identifier: { type: string }
+        context:
+          type: string
+          enum: [staff, public]
+          description: '`staff` (someone in Klargy) or `public` (the kiosk or the join page).'
+        locationRef: { type: [string, 'null'], description: 'The EMR''s id for the Klargy location, when mapped.' }
+
+    LookupCover:
+      type: [object, 'null']
+      required: [payer, status]
+      properties:
+        payer: { type: string }
+        plan: { type: [string, 'null'] }
+        memberNumber: { type: [string, 'null'] }
+        status: { type: string, enum: [active, expired, inactive, unknown], description: 'A failed check is `unknown` with a `message`.' }
+        expiresOn: { type: [string, 'null'], format: date }
+        checkedVia: { type: [string, 'null'], enum: [payer, records, null] }
+        message: { type: [string, 'null'] }
+
+    StaffLookupResponse:
+      type: object
+      required: [matched, patient, candidates]
+      properties:
+        matched: { type: boolean }
+        patient:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [ref, displayName]
+              properties:
+                ref: { type: string, description: 'The EMR''s patient id.' }
+                displayName: { type: string }
+                firstName: { type: [string, 'null'] }
+                mrNumber: { type: [string, 'null'] }
+                birthDate: { type: [string, 'null'], format: date }
+                gender: { type: [string, 'null'] }
+                phoneMasked: { type: [string, 'null'], examples: ['024••••19'] }
+                photoUrl: { type: [string, 'null'], format: uri }
+                identifiers:
+                  type: object
+                  properties:
+                    nationalId: { type: [string, 'null'] }
+                    passport: { type: [string, 'null'] }
+                    memberNumber: { type: [string, 'null'] }
+                cover: { $ref: '#/components/schemas/LookupCover' }
+                flags:
+                  type: array
+                  maxItems: 20
+                  items: { type: string }
+                  examples: [[has_open_visit, outstanding_balance]]
+        candidates:
+          type: array
+          maxItems: 5
+          description: A staff phone lookup that matched several patients (`matched` false).
+          items:
+            type: object
+            required: [ref, displayName]
+            properties:
+              ref: { type: string }
+              displayName: { type: string }
+              mrNumber: { type: [string, 'null'] }
+              birthDate: { type: [string, 'null'], format: date }
+              phoneMasked: { type: [string, 'null'] }
+
+    PublicLookupResponse:
+      type: object
+      required: [matched, patient, candidates]
+      properties:
+        matched: { type: boolean }
+        patient:
+          oneOf:
+            - type: 'null'
+            - type: object
+              properties:
+                firstName: { type: string }
+        candidates:
+          type: array
+          maxItems: 0

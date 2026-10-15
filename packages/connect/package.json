@@ -1,0 +1,69 @@
+{
+  "name": "@klargy/connect",
+  "version": "1.0.0",
+  "description": "Client, webhook verification and desk embed for Klargy Connect v1, the API an EMR uses to integrate with Klargy queues.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./desk": {
+      "import": {
+        "types": "./dist/desk.d.ts",
+        "default": "./dist/desk.js"
+      },
+      "require": {
+        "types": "./dist/desk.d.cts",
+        "default": "./dist/desk.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "klargy",
+    "queue",
+    "emr",
+    "healthcare",
+    "webhooks"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harrisyn/queue-management.git",
+    "directory": "packages/connect"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4",
+    "vitest": "^4.1.11"
+  }
+}

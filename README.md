@@ -43,7 +43,8 @@ frontend/
   src/middleware.ts   Tenant resolution (subdomain / custom domain -> org)
   prisma/             Schema and migrations
 tests/                End-to-end smoke scripts (run inside the app container)
-docs/                 Deployment guide, work tracker, design specs
+packages/connect/     @klargy/connect: TypeScript SDK for Klargy Connect (standalone package)
+docs/                 Deployment guide, Klargy Connect docs, work tracker, design specs
 ```
 
 ## Key concepts
@@ -68,11 +69,24 @@ npm run typecheck    # tsc --noEmit
 npm test             # unit tests (vitest)
 npm run build        # production build
 npm run db:migrate   # apply migrations
+npm run sandbox:create -- --name "Acme EMR sandbox"   # Klargy Connect sandbox workspace
 ```
+
+## Integrating an EMR
+
+Other systems integrate through **Klargy Connect**, an API addressed by the
+EMR's own ids. It covers tickets that follow the EMR's visits, signed
+webhooks, the staff desk framed in the EMR, patient lookup and journey
+automation.
+
+- [docs/connect/guide.md](docs/connect/guide.md): step-by-step integration guide for a new EMR, including the sandbox
+- [docs/connect/v1.md](docs/connect/v1.md): the contract; [docs/connect/openapi.yaml](docs/connect/openapi.yaml): the same as OpenAPI 3.1
+- SDKs: [`@klargy/connect`](packages/connect) (TypeScript: client, webhook and lookup verification, desk embed) and [`klargy-connect`](sdks/python/klargy-connect) (Python)
 
 ## Docs
 
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): Vercel and Docker deployment, environment variables
+- [docs/connect/guide.md](docs/connect/guide.md): integrating an EMR (Klargy Connect)
 - [docs/superpowers/tracker.md](docs/superpowers/tracker.md): live checklist of done / open work
 - [TECHNICAL_PRD.md](TECHNICAL_PRD.md): product requirements
 - [docs/superpowers/specs/](docs/superpowers/specs/): design specs per feature
