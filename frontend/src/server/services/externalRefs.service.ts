@@ -7,7 +7,7 @@ import prisma from '../lib/prisma';
  */
 
 export const ADMIN_MAPPABLE_TYPES = ['location', 'service', 'service_point', 'staff'] as const;
-export const CONNECT_REF_TYPES = ['patient', 'visit', 'encounter'] as const;
+export const CONNECT_REF_TYPES = ['patient', 'visit', 'encounter', 'appointment'] as const;
 export type RefType = (typeof ADMIN_MAPPABLE_TYPES)[number] | (typeof CONNECT_REF_TYPES)[number];
 
 /** The keys of an event's `refs` and the reference type each one reads. */
@@ -19,6 +19,7 @@ const REF_KEYS = {
   location: 'location',
   servicePoint: 'service_point',
   staff: 'staff', // the acting user
+  appointment: 'appointment', // Appointment id (phase 5)
 } as const satisfies Record<string, RefType>;
 
 export type RefKey = keyof typeof REF_KEYS;

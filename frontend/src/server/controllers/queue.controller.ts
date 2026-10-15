@@ -15,6 +15,7 @@ import {
   afterEntryCalled,
   transferEntryToService,
   TransferError,
+  setQueueStatus,
   getOrCreateQueueForDate,
   serviceTimeZone,
   ORIGIN,
@@ -315,21 +316,11 @@ export const updateQueueStatus = async (req: Request, res: Response, next: NextF
       return res.status(400).json({ error: 'status must be ACTIVE, PAUSED or CLOSED' });
     }
 
-    const queue = await prisma.queue.update({
-      where: { id },
-      data: { status },
-      include: { service: { select: { locationId: true } } },
-    });
-
-    // Emit to both queue and location rooms
-    const updateData = {
-      queueId: id,
-      action: 'status_changed',
-      status,
-    };
-    emitToQueue(id, SOCKET_EVENTS.QUEUE_UPDATED, updateData);
-    emitToLocation(queue.service.locationId, SOCKET_EVENTS.QUEUE_UPDATED, updateData);
-    await recordQueueEvent({ action: 'queue.status_changed', actorUserId: actorId(req), queueId: id, data: { status } });
+    // Sockets, events (queue.paused / queue.resumed) and, on a pause, a
+    // message to everyone waiting.
+    await setQueueStatus(id, status, { actorUserId: actorId(req) });
+    const queue = await prisma.queue.findUnique({ where: { id }, include: { service: { select: { locationId: true } } } });
+    if (!queue) return res.status(404).json({ error: 'Queue not found' });
 
     res.json(queue);
   } catch (error) {
@@ -577,6 +568,7 @@ export const getPublicStatus = async (req: Request, res: Response, next: NextFun
     res.json({
       ticketNumber: entry.ticketNumber,
       status: entry.status,
+      queueStatus: queue.status,
       position,
       estimatedWaitTime,
       serviceName: queue.service.name,

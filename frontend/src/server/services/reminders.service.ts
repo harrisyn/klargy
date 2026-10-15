@@ -22,11 +22,10 @@ export async function sendAppointmentReminders(): Promise<number> {
   const appointments = await prisma.appointment.findMany({
     where: {
       status: { in: ['SCHEDULED', 'CONFIRMED'] },
-      slot: { startTime: { gte: from, lt: to } },
+      startTime: { gte: from, lt: to },
     },
     include: {
       user: { select: { id: true, email: true, phone: true, firstName: true } },
-      slot: { select: { startTime: true } },
       service: {
         select: {
           name: true,
@@ -49,8 +48,8 @@ export async function sendAppointmentReminders(): Promise<number> {
     const settings = readNotificationSettings(org.notificationSettings);
     const tz = validTimeZone(appt.service.location.timezone);
     const zone = tz ? { timeZone: tz } : {};
-    const day = appt.slot.startTime.toLocaleDateString('en', { weekday: 'long', day: 'numeric', month: 'long', ...zone });
-    const time = appt.slot.startTime.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', ...zone });
+    const day = appt.startTime.toLocaleDateString('en', { weekday: 'long', day: 'numeric', month: 'long', ...zone });
+    const time = appt.startTime.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', ...zone });
     const message = `Reminder: your ${appt.service.name} appointment at ${appt.service.location.name} is on ${day} at ${time}. Please check in when you arrive.`;
 
     let delivered = false;

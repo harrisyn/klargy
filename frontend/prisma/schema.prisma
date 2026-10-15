@@ -345,20 +345,26 @@ model Appointment {
   id            String    @id @default(uuid())
   userId        String
   serviceId     String
-  slotId        String
-  createdBy     String
-  status        String    @default("SCHEDULED") // SCHEDULED, CONFIRMED, CANCELLED, COMPLETED
+  // Null for an appointment booked in a connected EMR (Klargy Connect),
+  // whose times need not match Klargy's slots.
+  slotId        String?
+  createdBy     String?
+  // The appointment's own times: the slot's for one booked in Klargy.
+  startTime     DateTime
+  endTime       DateTime?
+  status        String    @default("SCHEDULED") // SCHEDULED, CONFIRMED, CHECKED_IN, CANCELLED, NO_SHOW, COMPLETED
   rescheduledAt DateTime?
   notes         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   service       Service   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  slot          Slot      @relation(fields: [slotId], references: [id], onDelete: Cascade)
-  creator       User      @relation("CreatedAppointments", fields: [createdBy], references: [id])
+  slot          Slot?     @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  creator       User?     @relation("CreatedAppointments", fields: [createdBy], references: [id], onDelete: Restrict)
   
   @@index([userId])
   @@index([serviceId])
+  @@index([startTime])
 }
 
 enum UserRole {
@@ -406,6 +412,7 @@ enum NotificationType {
   NOW_SERVING
   APPOINTMENT_REMINDER
   APPOINTMENT_CANCELLED
+  QUEUE_DELAYED
 }
 
 enum NotificationChannel {

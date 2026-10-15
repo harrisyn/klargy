@@ -95,7 +95,15 @@ export const createAppointment = async (req: Request, res: Response, next: NextF
     }
 
     const appointment = await prisma.appointment.create({
-      data: { userId: patientId, serviceId, slotId, createdBy: caller.id, notes: notes || null },
+      data: {
+        userId: patientId,
+        serviceId,
+        slotId,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        createdBy: caller.id,
+        notes: notes || null,
+      },
       include: appointmentInclude,
     });
 
@@ -133,13 +141,13 @@ export const getAppointments = async (req: Request, res: Response, next: NextFun
         ? validTimeZone((await prisma.location.findUnique({ where: { id: locationId as string }, select: { timezone: true } }))?.timezone)
         : serviceId ? await serviceTimeZone(serviceId as string) : undefined;
       const day = startOfLocalDate(String(date), tz);
-      whereClause.slot = { startTime: { gte: day, lte: getEndOfDay(day, tz) } };
+      whereClause.startTime = { gte: day, lte: getEndOfDay(day, tz) };
     }
 
     const appointments = await prisma.appointment.findMany({
       where: whereClause,
       include: appointmentInclude,
-      orderBy: { slot: { startTime: 'asc' } },
+      orderBy: { startTime: 'asc' },
       take: 500,
     });
 
@@ -169,14 +177,14 @@ export const getUserAppointments = async (req: Request, res: Response, next: Nex
 
     const whereClause: any = { userId };
     if (upcoming === 'true') {
-      whereClause.slot = { startTime: { gte: new Date() } };
+      whereClause.startTime = { gte: new Date() };
       whereClause.status = { in: ACTIVE_STATUSES };
     }
 
     const appointments = await prisma.appointment.findMany({
       where: whereClause,
       include: appointmentInclude,
-      orderBy: { slot: { startTime: 'asc' } },
+      orderBy: { startTime: 'asc' },
     });
 
     res.json(appointments);
@@ -206,17 +214,18 @@ export const rescheduleAppointment = async (req: Request, res: Response, next: N
 
     const updated = await prisma.appointment.update({
       where: { id },
-      data: { slotId: newSlotId, rescheduledAt: new Date() },
+      data: { slotId: newSlotId, startTime: newSlot.startTime, endTime: newSlot.endTime, rescheduledAt: new Date() },
       include: appointmentInclude,
     });
-    await releaseSlot(appointment.slotId);
-
-    emitToQueue(appointment.slot.queueId, SOCKET_EVENTS.SLOT_RELEASED, { slotId: appointment.slotId });
+    if (appointment.slot) {
+      await releaseSlot(appointment.slot.id);
+      emitToQueue(appointment.slot.queueId, SOCKET_EVENTS.SLOT_RELEASED, { slotId: appointment.slot.id });
+    }
     await recordQueueEvent({
       action: 'appointment.rescheduled',
       actorUserId: actorId(req),
       queueId: newSlot.queueId,
-      data: { appointmentId: id, fromSlotStart: appointment.slot.startTime, toSlotStart: newSlot.startTime },
+      data: { appointmentId: id, fromSlotStart: appointment.startTime, toSlotStart: newSlot.startTime },
     });
 
     res.json(updated);
@@ -241,14 +250,20 @@ export const cancelAppointment = async (req: Request, res: Response, next: NextF
     if (count === 0) {
       return res.status(400).json({ error: `This appointment is already ${appointment.status.toLowerCase()}` });
     }
-    await releaseSlot(appointment.slotId);
-
-    emitToQueue(appointment.slot.queueId, SOCKET_EVENTS.SLOT_RELEASED, { slotId: appointment.slotId });
+    if (appointment.slot) {
+      await releaseSlot(appointment.slot.id);
+      emitToQueue(appointment.slot.queueId, SOCKET_EVENTS.SLOT_RELEASED, { slotId: appointment.slot.id });
+    }
+    const organizationId = (await prisma.service.findUnique({
+      where: { id: appointment.serviceId },
+      select: { location: { select: { organizationId: true } } },
+    }))?.location.organizationId;
     await recordQueueEvent({
       action: 'appointment.cancelled',
       actorUserId: actorId(req),
-      queueId: appointment.slot.queueId,
-      data: { appointmentId: id, slotStart: appointment.slot.startTime },
+      queueId: appointment.slot?.queueId ?? null,
+      organizationId,
+      data: { appointmentId: id, slotStart: appointment.startTime, patientId: appointment.userId },
     });
 
     res.json(await prisma.appointment.findUnique({ where: { id }, include: appointmentInclude }));
@@ -264,14 +279,18 @@ export const checkInAppointment = async (req: Request, res: Response, next: Next
 
     const appointment = await prisma.appointment.findUnique({
       where: { id },
-      include: { slot: { include: { queue: { include: { service: true } } } } },
+      include: { slot: { include: { queue: { include: { service: true } } } }, service: true },
     });
     if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
     if (!ACTIVE_STATUSES.includes(appointment.status)) {
       return res.status(400).json({ error: 'This appointment can no longer be checked in' });
     }
 
-    const queue = appointment.slot.queue;
+    // An appointment booked in a connected EMR has no slot: it checks in to
+    // its service's queue for the day of the appointment.
+    const queue = appointment.slot?.queue ?? (await getOrCreateQueueForDate(appointment.serviceId, appointment.startTime))?.queue;
+    if (!queue) return res.status(404).json({ error: 'Appointment not found' });
+    const service = appointment.slot?.queue.service ?? appointment.service;
     const tz = await serviceTimeZone(queue.serviceId);
     if (getStartOfDay(queue.date, tz).getTime() !== getStartOfDay(new Date(), tz).getTime()) {
       return res.status(400).json({ error: 'Check-in opens on the day of the appointment' });
@@ -287,7 +306,7 @@ export const checkInAppointment = async (req: Request, res: Response, next: Next
     if (count === 0) return res.status(400).json({ error: 'This appointment was already checked in' });
 
     const sequence = await getNextSequence(prisma, queue.id);
-    const ticketNumber = generateTicketNumber(queue.service.name.charAt(0).toUpperCase(), sequence);
+    const ticketNumber = generateTicketNumber(service.name.charAt(0).toUpperCase(), sequence);
     const lastEntry = await prisma.queueEntry.findFirst({ where: { queueId: queue.id }, orderBy: { sortOrder: 'desc' } });
 
     const entry = await prisma.queueEntry.create({
@@ -313,7 +332,7 @@ export const checkInAppointment = async (req: Request, res: Response, next: Next
     });
     await afterQueueChange(queue.id);
 
-    res.json({ entry, ticketNumber, serviceName: queue.service.name, queueId: queue.id });
+    res.json({ entry, ticketNumber, serviceName: service.name, queueId: queue.id });
   } catch (error) {
     next(error);
   }

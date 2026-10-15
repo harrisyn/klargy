@@ -66,13 +66,16 @@ export interface PatientSummary {
 
 export interface Appointment {
   id: string;
-  status: 'SCHEDULED' | 'CONFIRMED' | 'CHECKED_IN' | 'CANCELLED' | 'COMPLETED';
+  status: 'SCHEDULED' | 'CONFIRMED' | 'CHECKED_IN' | 'CANCELLED' | 'NO_SHOW' | 'COMPLETED';
   notes: string | null;
   rescheduledAt: string | null;
   serviceId: string;
+  startTime: string;
+  endTime: string | null;
   user: { id: string; firstName: string; lastName: string; email: string; phone: string | null };
   service: { id: string; name: string; location: { id: string; name: string } };
-  slot: { id: string; startTime: string; endTime: string };
+  /** Null for an appointment booked in a connected EMR. */
+  slot: { id: string; startTime: string; endTime: string } | null;
 }
 
 export interface NotificationSettings {

@@ -22,7 +22,10 @@ export type QueueAction =
   | 'entry.no_show'
   | 'entry.transferred'
   | 'entry.reordered'
+  | 'entry.priority_changed'
   | 'queue.status_changed'
+  | 'queue.paused'
+  | 'queue.resumed'
   | 'appointment.created'
   | 'appointment.rescheduled'
   | 'appointment.cancelled'
@@ -33,6 +36,7 @@ export type QueueAction =
 
 const WEBHOOK_ACTIONS = new Set<string>([
   'entry.joined', 'entry.called', 'entry.served', 'entry.cancelled', 'entry.no_show', 'entry.transferred',
+  'entry.priority_changed', 'queue.paused', 'queue.resumed',
   'appointment.created', 'appointment.rescheduled', 'appointment.cancelled', 'appointment.checked_in',
   'journey.completed', 'servicepoint.opened', 'servicepoint.closed',
 ]);
@@ -191,12 +195,15 @@ export async function recordQueueEvent(input: QueueEventInput): Promise<void> {
     });
 
     if (WEBHOOK_ACTIONS.has(input.action)) {
+      const appointmentRef: RefSubject =
+        typeof input.data?.appointmentId === 'string' ? { appointment: input.data.appointmentId } : {};
       const refSubject: RefSubject =
         input.refSubject ??
         (snap
-          ? entryRefSubject(snap.snapshot, input.actorUserId)
+          ? { ...entryRefSubject(snap.snapshot, input.actorUserId), ...appointmentRef }
           : {
               patient: typeof input.data?.patientId === 'string' ? input.data.patientId : null,
+              ...appointmentRef,
               visit: null,
               encounter: null,
               service: queueCtx?.serviceId ?? null,
@@ -349,7 +356,7 @@ export async function getOrCreateQueueForDate(serviceId: string, date: Date = ne
 }
 
 export class TransferError extends Error {
-  constructor(message: string, public status = 400) {
+  constructor(message: string, public status = 400, public code?: 'NOT_FOUND' | 'QUEUE_CLOSED' | 'INVALID_TRANSITION') {
     super(message);
   }
 }
@@ -362,28 +369,47 @@ export class TransferError extends Error {
 export async function transferEntryToService(
   sourceEntryId: string,
   toServiceId: string,
-  opts: { actorUserId?: string | null; priority?: number; completeSource?: boolean; origin?: EventOrigin } = {}
+  opts: {
+    actorUserId?: string | null;
+    priority?: number;
+    completeSource?: boolean;
+    origin?: EventOrigin;
+    /** Refuse (409) unless the source is still waiting or being served, and
+     * complete it only if it still is, so a race can't double-move it. */
+    requireOpenSource?: boolean;
+    /** Extra fields for the event (audit log and webhook data). */
+    data?: Record<string, unknown>;
+  } = {}
 ) {
   const source = await prisma.queueEntry.findUnique({
     where: { id: sourceEntryId },
     include: { queue: { include: { service: { include: { location: true } } } } },
   });
-  if (!source) throw new TransferError('Entry not found', 404);
+  if (!source) throw new TransferError('Entry not found', 404, 'NOT_FOUND');
+  const sourceOpen = source.status === 'WAITING' || source.status === 'SERVING';
+  if (opts.requireOpenSource && !sourceOpen) {
+    throw new TransferError(`An entry that is ${source.status} can’t be transferred`, 409, 'INVALID_TRANSITION');
+  }
 
   const target = await getOrCreateQueueForDate(toServiceId);
-  if (!target) throw new TransferError('Target service not found', 404);
+  if (!target) throw new TransferError('Target service not found', 404, 'NOT_FOUND');
   const targetLocation = await prisma.location.findUnique({ where: { id: target.service.locationId } });
   if (!targetLocation || targetLocation.organizationId !== source.queue.service.location.organizationId) {
-    throw new TransferError('Target service not found', 404);
+    throw new TransferError('Target service not found', 404, 'NOT_FOUND');
   }
-  if (!target.service.isActive) throw new TransferError('That service is not active');
-  if (target.queue.status !== 'ACTIVE') throw new TransferError(`The ${target.service.name} queue isn’t taking anyone right now`);
+  if (!target.service.isActive) throw new TransferError('That service is not active', 400, 'QUEUE_CLOSED');
+  if (target.queue.status !== 'ACTIVE') {
+    throw new TransferError(`The ${target.service.name} queue isn’t taking anyone right now`, 400, 'QUEUE_CLOSED');
+  }
 
-  if (opts.completeSource && (source.status === 'WAITING' || source.status === 'SERVING')) {
-    await prisma.queueEntry.update({
-      where: { id: source.id },
+  if (opts.completeSource && sourceOpen) {
+    const done = await prisma.queueEntry.updateMany({
+      where: { id: source.id, status: { in: ['WAITING', 'SERVING'] } },
       data: { status: 'SERVED', completedAt: new Date(), notes: `Transferred to ${target.service.name}` },
     });
+    if (done.count !== 1 && opts.requireOpenSource) {
+      throw new TransferError('The entry changed status before this could be applied', 409, 'INVALID_TRANSITION');
+    }
   }
 
   const sequence = await getNextSequence(prisma, target.queue.id);
@@ -438,10 +464,86 @@ export async function transferEntryToService(
     origin: opts.origin,
     queueId: target.queue.id,
     entryId: newEntry.id,
-    data: { fromEntryId: source.id, fromServiceId: source.queue.serviceId, toServiceId },
+    data: { ...(opts.data ?? {}), fromEntryId: source.id, fromServiceId: source.queue.serviceId, toServiceId },
   });
   await afterQueueChange(source.queueId);
   await afterQueueChange(target.queue.id);
 
   return { entry: newEntry, queue: target.queue, service: target.service };
+}
+
+// ---------------------------------------------------------------------------
+// Pausing and resuming a queue
+// ---------------------------------------------------------------------------
+
+export type QueueStatusValue = 'ACTIVE' | 'PAUSED' | 'CLOSED';
+
+/**
+ * Sets a queue's status, for staff and for Klargy Connect alike. Only the
+ * call that actually changes it does anything else: sockets, the event
+ * (queue.paused / queue.resumed, or queue.status_changed for closing), and
+ * on a pause one message to everyone waiting. Returns whether it changed.
+ */
+export async function setQueueStatus(
+  queueId: string,
+  status: QueueStatusValue,
+  ctx: { actorUserId?: string | null; origin?: EventOrigin; reason?: string | null; message?: string | null } = {}
+): Promise<{ changed: boolean; previous: QueueStatusValue | null }> {
+  const before = await prisma.queue.findUnique({
+    where: { id: queueId },
+    select: {
+      status: true,
+      serviceId: true,
+      service: { select: { id: true, name: true, location: { select: { id: true, name: true, organizationId: true } } } },
+    },
+  });
+  if (!before) return { changed: false, previous: null };
+  if (before.status === status) return { changed: false, previous: before.status };
+
+  const pausedAt = new Date();
+  // Conditional on the old status, so two callers can't both "pause" it and
+  // patients hear about each pause once.
+  const updated = await prisma.queue.updateMany({ where: { id: queueId, status: before.status }, data: { status } });
+  if (updated.count !== 1) return { changed: false, previous: before.status };
+
+  const { service } = before;
+  const updateData = { queueId, action: 'status_changed', status };
+  emitToQueue(queueId, SOCKET_EVENTS.QUEUE_UPDATED, updateData);
+  emitToLocation(service.location.id, SOCKET_EVENTS.QUEUE_UPDATED, updateData);
+
+  const reason = ctx.reason ?? null;
+  if (status === 'CLOSED') {
+    await recordQueueEvent({ action: 'queue.status_changed', actorUserId: ctx.actorUserId, origin: ctx.origin, queueId, data: { status } });
+  } else {
+    const origin: EventOrigin = ctx.origin ?? (ctx.actorUserId ? ORIGIN.staff : ORIGIN.system);
+    await recordQueueEvent({
+      action: status === 'PAUSED' ? 'queue.paused' : 'queue.resumed',
+      actorUserId: ctx.actorUserId,
+      origin,
+      queueId,
+      organizationId: service.location.organizationId,
+      data: { status, previousStatus: before.status, ...(reason ? { reason } : {}) },
+      payload: {
+        queueId,
+        service: { id: service.id, name: service.name },
+        location: { id: service.location.id, name: service.location.name },
+        reason,
+      },
+      refSubject: { service: service.id, location: service.location.id },
+    });
+  }
+
+  if (status === 'PAUSED') {
+    try {
+      const waiting = await prisma.queueEntry.findMany({ where: { queueId, status: 'WAITING' }, select: { id: true } });
+      for (const entry of waiting) {
+        await notifyEntry(entry.id, 'QUEUE_DELAYED', { text: ctx.message ?? null, since: pausedAt }).catch((e) =>
+          console.error('pause notification failed:', e)
+        );
+      }
+    } catch (error) {
+      console.error('pause notifications failed:', error);
+    }
+  }
+  return { changed: true, previous: before.status };
 }

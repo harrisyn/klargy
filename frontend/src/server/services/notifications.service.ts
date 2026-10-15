@@ -5,7 +5,7 @@ import { sendNotificationEmail } from '../utils/email';
 import { getSmsProvider } from './sms';
 import { statusUrlFor } from '../config/appConfig';
 
-export type QueueNotificationType = 'QUEUE_JOINED' | 'TURN_APPROACHING' | 'NOW_SERVING';
+export type QueueNotificationType = 'QUEUE_JOINED' | 'TURN_APPROACHING' | 'NOW_SERVING' | 'QUEUE_DELAYED';
 
 export interface NotificationSettings {
   turnApproachingAt: number;
@@ -44,9 +44,14 @@ const isRealEmail = (email: string) => !email.endsWith('@guest.qms.local');
 
 export function buildMessage(
   type: QueueNotificationType,
-  ctx: { ticket: string; service: string; position?: number; servicePoint?: string | null; statusUrl?: string }
+  ctx: { ticket: string; service: string; position?: number; servicePoint?: string | null; statusUrl?: string; text?: string | null }
 ): { heading: string; message: string } {
   switch (type) {
+    case 'QUEUE_DELAYED':
+      return {
+        heading: `${ctx.service} is paused`,
+        message: ctx.text || `${ctx.service} is paused for now. Please stay nearby; we'll let you know when it reopens.`,
+      };
     case 'QUEUE_JOINED':
       return {
         heading: `You're in the queue: ${ctx.ticket}`,
@@ -79,10 +84,18 @@ export function buildMessage(
 export async function notifyEntry(
   entryId: string,
   type: QueueNotificationType,
-  extra: { position?: number; servicePointName?: string | null } = {}
+  extra: {
+    position?: number;
+    servicePointName?: string | null;
+    /** Our own wording instead of the standard message (QUEUE_DELAYED). */
+    text?: string | null;
+    /** Only a message of this type sent at or after this time counts as a
+     * repeat, for messages that may go out again later (one per pause). */
+    since?: Date;
+  } = {}
 ): Promise<void> {
   const already = await prisma.notification.findFirst({
-    where: { queueEntryId: entryId, type },
+    where: { queueEntryId: entryId, type, ...(extra.since ? { sentAt: { gte: extra.since } } : {}) },
     select: { id: true },
   });
   if (already) return;
@@ -112,6 +125,7 @@ export async function notifyEntry(
     service: entry.queue.service.name,
     position: extra.position,
     servicePoint: extra.servicePointName,
+    text: extra.text,
     statusUrl: statusUrlFor(entry.queueId, entry.id, org.slug),
   });
 

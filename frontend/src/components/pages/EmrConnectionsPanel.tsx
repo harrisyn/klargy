@@ -89,17 +89,52 @@ function CreateModal({ open, onClose, onCreated }: {
 }
 
 type Row = { id: string; name: string; detail?: string; externalId: string | null };
+type Option = { id: string; name: string; kind?: string | null };
+
+// What the EMR says each of its services is (Klargy Connect catalogue `kind`).
+const KIND_LABELS: Record<string, string> = {
+  clinic: 'Clinic',
+  lab: 'Laboratory',
+  imaging: 'Imaging',
+  pharmacy: 'Pharmacy',
+  cashier: 'Cashier',
+};
+const KIND_ORDER = ['clinic', 'lab', 'imaging', 'pharmacy', 'cashier'];
+const kindLabel = (kind: string) => KIND_LABELS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
+const kindRank = (kind: string) => (KIND_ORDER.includes(kind) ? KIND_ORDER.indexOf(kind) : KIND_ORDER.length);
+
+/** Options grouped by kind (clinics first), or one plain list when the EMR
+ * sends no kinds. */
+function groupByKind(options: Option[]): { kind: string | null; options: Option[] }[] {
+  if (!options.some((o) => o.kind)) return [{ kind: null, options }];
+  const groups = new Map<string, Option[]>();
+  for (const o of options) {
+    const kind = o.kind || 'other';
+    if (!groups.has(kind)) groups.set(kind, []);
+    groups.get(kind)!.push(o);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => kindRank(a) - kindRank(b) || a.localeCompare(b))
+    .map(([kind, list]) => ({ kind, options: [...list].sort((x, y) => x.name.localeCompare(y.name)) }));
+}
 
 function MappingSection({ title, type, rows, options, onChange, busy }: {
   title: string;
   type: EmrMappableType;
   rows: Row[];
-  options: { id: string; name: string }[];
+  options: Option[];
   onChange: (type: EmrMappableType, row: Row, externalId: string | null) => void;
   busy: string | null;
 }) {
   if (rows.length === 0) return null;
   const takenBy = new Map(rows.filter((r) => r.externalId).map((r) => [r.externalId!, r.id]));
+  const groups = groupByKind(options);
+  const kindOf = new Map(options.filter((o) => o.kind).map((o) => [o.id, o.kind!]));
+  const renderOption = (o: Option, r: Row) => (
+    <option key={o.id} value={o.id} disabled={takenBy.has(o.id) && takenBy.get(o.id) !== r.id}>
+      {o.name}
+    </option>
+  );
   return (
     <div className="stack" style={{ gap: '0.5rem' }}>
       <h3 style={{ margin: 0, fontSize: '0.9375rem' }}>{title}</h3>
@@ -121,12 +156,19 @@ function MappingSection({ title, type, rows, options, onChange, busy }: {
                     onChange={(e) => onChange(type, r, e.target.value || null)}
                   >
                     <option value="">Not matched</option>
-                    {options.map((o) => (
-                      <option key={o.id} value={o.id} disabled={takenBy.has(o.id) && takenBy.get(o.id) !== r.id}>
-                        {o.name}
-                      </option>
-                    ))}
+                    {groups.map((g) =>
+                      g.kind ? (
+                        <optgroup key={g.kind} label={kindLabel(g.kind)}>
+                          {g.options.map((o) => renderOption(o, r))}
+                        </optgroup>
+                      ) : (
+                        g.options.map((o) => renderOption(o, r))
+                      )
+                    )}
                   </Select>
+                  {r.externalId && kindOf.has(r.externalId) && (
+                    <div style={{ marginTop: '0.25rem' }}><Badge tone="neutral">{kindLabel(kindOf.get(r.externalId)!)}</Badge></div>
+                  )}
                 </td>
               </tr>
             ))}

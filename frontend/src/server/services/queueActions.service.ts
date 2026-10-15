@@ -61,21 +61,9 @@ const getLocationIdFromQueue = async (queueId: string): Promise<string | null> =
 // Join
 // ---------------------------------------------------------------------------
 
-export async function joinQueueEntry(
-  queueId: string,
-  input: { userId: string; priority?: number; notes?: string | null; journeyId?: string | null },
-  ctx: ActionContext = {},
-  hooks: { beforeEvent?: (entryId: string) => Promise<void> } = {}
-) {
-  const { userId, priority, notes } = input;
-  const queue = await prisma.queue.findUnique({
-    where: { id: queueId },
-    include: { service: { include: { location: true } } },
-  });
-  if (!queue) throw new QueueActionError(404, 'NOT_FOUND', { error: 'Queue not found' });
-  if (queue.status !== 'ACTIVE') throw new QueueActionError(400, 'QUEUE_CLOSED', { error: 'Queue is not active' });
-
-  const organizationId = queue.service.location.organizationId;
+/** Refuses a new ticket (403 LIMIT_REACHED) once the plan's daily or
+ * billing-period entry limit is reached. */
+export async function checkEntryLimits(organizationId: string) {
   const [dailyCheck, periodCheck] = await Promise.all([
     checkLimit(organizationId, 'queueEntriesDaily'),
     checkLimit(organizationId, 'queueEntriesPeriod'),
@@ -98,6 +86,23 @@ export async function joinQueueEntry(
       limit: periodCheck.limit,
     });
   }
+}
+
+export async function joinQueueEntry(
+  queueId: string,
+  input: { userId: string; priority?: number; notes?: string | null; journeyId?: string | null },
+  ctx: ActionContext = {},
+  hooks: { beforeEvent?: (entryId: string) => Promise<void> } = {}
+) {
+  const { userId, priority, notes } = input;
+  const queue = await prisma.queue.findUnique({
+    where: { id: queueId },
+    include: { service: { include: { location: true } } },
+  });
+  if (!queue) throw new QueueActionError(404, 'NOT_FOUND', { error: 'Queue not found' });
+  if (queue.status !== 'ACTIVE') throw new QueueActionError(400, 'QUEUE_CLOSED', { error: 'Queue is not active' });
+
+  await checkEntryLimits(queue.service.location.organizationId);
 
   const existingEntry = await prisma.queueEntry.findFirst({
     where: { queueId, userId, status: { in: ['WAITING', 'SERVING'] } },
@@ -385,4 +390,45 @@ export async function endEntry(
   await afterQueueChange(queueId);
 
   return entry;
+}
+
+// ---------------------------------------------------------------------------
+// Priority
+// ---------------------------------------------------------------------------
+
+/**
+ * Changes an open entry's priority, which moves it in the waiting line.
+ * Returns the previous priority, or null when nothing changed (same value).
+ */
+export async function setEntryPriority(entryId: string, priority: number, ctx: ActionContext = {}) {
+  const entry = await prisma.queueEntry.findUnique({
+    where: { id: entryId },
+    select: { id: true, queueId: true, status: true, priority: true },
+  });
+  if (!entry) throw new QueueActionError(404, 'NOT_FOUND', { error: 'Entry not found' });
+  if (entry.priority === priority) return { previousPriority: null };
+  const updated = await prisma.queueEntry.updateMany({
+    where: { id: entryId, status: { in: ['WAITING', 'SERVING'] } },
+    data: { priority },
+  });
+  if (updated.count !== 1) {
+    throw new QueueActionError(409, 'INVALID_TRANSITION', { error: 'The entry changed status before this could be applied' });
+  }
+
+  const locationId = await getLocationIdFromQueue(entry.queueId);
+  emitToQueueAndLocation(entry.queueId, locationId, SOCKET_EVENTS.QUEUE_UPDATED, {
+    queueId: entry.queueId,
+    entryId,
+    action: 'reordered',
+  });
+  await recordQueueEvent({
+    action: 'entry.priority_changed',
+    actorUserId: ctx.actorUserId,
+    origin: ctx.origin,
+    queueId: entry.queueId,
+    entryId,
+    data: { ...(ctx.data ?? {}), priority, previousPriority: entry.priority },
+  });
+  await afterQueueChange(entry.queueId);
+  return { previousPriority: entry.priority };
 }
