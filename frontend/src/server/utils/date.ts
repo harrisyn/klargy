@@ -51,6 +51,12 @@ export function zonedTime(tz: string, year: number, month: number, day: number, 
   return new Date(result);
 }
 
+/** "10:30": the 24-hour wall-clock time of an instant in tz (UTC when tz is unknown). */
+export function clockTime(date: Date, tz?: string | null): string {
+  const p = zonedParts(new Date(date), validTimeZone(tz) ?? 'UTC');
+  return `${String(p.hour % 24).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
+}
+
 export const hourIn = (date: Date, tz?: string) => (tz ? zonedParts(date, tz).hour : date.getHours());
 export const weekdayIn = (date: Date, tz?: string) => (tz ? zonedParts(date, tz).weekday : date.getDay());
 

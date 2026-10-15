@@ -4,7 +4,7 @@ import NoOrganization from '@/components/NoOrganization';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Building2, ContactRound, MonitorSmartphone, Bell, Palette, Globe, Lock, Upload, ArrowUp, ArrowDown, X, Plus,
-  CheckCircle2, RefreshCw, Copy, AlertTriangle,
+  CheckCircle2, RefreshCw, Copy, AlertTriangle, CalendarClock,
 } from 'lucide-react';
 import api from '@/api/client';
 import type { CustomDomainInfo } from '@/api/client';
@@ -42,15 +42,29 @@ interface Organization {
   customerLabel?: string | null;
   customerLabelPlural?: string | null;
   joinIdentifierType?: string | null;
+  bookedArrivalSettings?: Partial<Arrival> | null;
 }
 
-type Section = 'general' | 'patient' | 'screens' | 'notifications' | 'branding' | 'domain';
+interface Arrival { enabled: boolean; earlyMinutes: number; lateMinutes: number; maxBookedShare: number }
+const DEFAULT_ARRIVAL: Arrival = { enabled: true, earlyMinutes: 10, lateMinutes: 15, maxBookedShare: 50 };
+// Share of the people placed ahead of a walk-in who may be booked patients that arrived after them.
+const SHARE_CHOICES = [
+  { value: 0, label: 'None: walk-ins who arrived first always stay ahead' },
+  { value: 50, label: 'Half: one booked patient, then one walk-in' },
+  { value: 67, label: 'Two thirds: two booked patients, then one walk-in' },
+  { value: 75, label: 'Three quarters: three booked patients, then one walk-in' },
+  { value: 100, label: 'No limit: booked patients always go by their booked time' },
+];
+const minutesIn = (value: string) => Math.min(240, Math.max(0, Math.round(Number(value) || 0)));
+
+type Section = 'general' | 'patient' | 'screens' | 'notifications' | 'arrivals' | 'branding' | 'domain';
 
 const sectionsFor = (t: Terms): { id: Section; label: string; hint: string; icon: typeof Building2 }[] => [
   { id: 'general', label: 'Organization', hint: 'Name, type, contact and workspace address', icon: Building2 },
   { id: 'patient', label: `${t.Person} details`, hint: 'What people are asked when they join', icon: ContactRound },
   { id: 'screens', label: 'Screen privacy', hint: `How ${t.people} appear on lobby screens`, icon: MonitorSmartphone },
   { id: 'notifications', label: 'Notifications', hint: 'Turn-approaching alerts by email and SMS', icon: Bell },
+  { id: 'arrivals', label: 'Booked arrivals', hint: `Where ${t.people} with an appointment join the line`, icon: CalendarClock },
   { id: 'branding', label: 'Branding', hint: 'Logo and colour on public pages', icon: Palette },
   { id: 'domain', label: 'Custom domain', hint: 'Use your own web address', icon: Globe },
 ];
@@ -112,6 +126,7 @@ export default function AdminSettingsPage() {
   const [newField, setNewField] = useState({ label: '', type: 'text' });
   const [displayMode, setDisplayMode] = useState('TICKET_ONLY');
   const [notify, setNotify] = useState({ turnApproachingAt: 3, email: true, sms: false });
+  const [arrival, setArrival] = useState<Arrival>(DEFAULT_ARRIVAL);
   const [brand, setBrand] = useState({ primaryColor: '', hidePoweredBy: false });
   // '' = off; 'mrNumber' | 'memberNumber' = checked with the EMR before a ticket is issued.
   const [joinIdentifier, setJoinIdentifier] = useState('');
@@ -126,8 +141,8 @@ export default function AdminSettingsPage() {
   const [copied, setCopied] = useState(false);
 
   const current = useMemo(
-    () => JSON.stringify({ general, fields, displayMode, notify, brand, joinIdentifier }),
-    [general, fields, displayMode, notify, brand, joinIdentifier]
+    () => JSON.stringify({ general, fields, displayMode, notify, brand, joinIdentifier, arrival }),
+    [general, fields, displayMode, notify, brand, joinIdentifier, arrival]
   );
   const dirty = snapshot !== '' && current !== snapshot;
 
@@ -148,8 +163,9 @@ export default function AdminSettingsPage() {
         const n = { turnApproachingAt: 3, email: true, sms: false, ...(org.notificationSettings || {}) };
         const b = { primaryColor: org.primaryColor || '', hidePoweredBy: !!org.hidePoweredBy };
         const j = org.joinIdentifierType || '';
-        setGeneral(g); setFields(f); setDisplayMode(d); setNotify(n); setBrand(b); setJoinIdentifier(j);
-        setSnapshot(JSON.stringify({ general: g, fields: f, displayMode: d, notify: n, brand: b, joinIdentifier: j }));
+        const a = { ...DEFAULT_ARRIVAL, ...(org.bookedArrivalSettings || {}) };
+        setGeneral(g); setFields(f); setDisplayMode(d); setNotify(n); setBrand(b); setJoinIdentifier(j); setArrival(a);
+        setSnapshot(JSON.stringify({ general: g, fields: f, displayMode: d, notify: n, brand: b, joinIdentifier: j, arrival: a }));
       } catch {
         setMessage({ type: 'error', text: 'Couldn’t load your settings. Refresh to try again.' });
       } finally {
@@ -197,6 +213,7 @@ export default function AdminSettingsPage() {
         identityFieldsConfig,
         defaultDisplayMode: displayMode,
         notificationSettings: notify,
+        bookedArrivalSettings: arrival,
         joinIdentifierType: joinIdentifier || null,
         // Branding fields are plan-gated server-side; sending them (even as
         // null) on a plan without customBranding rejects the whole save.
@@ -495,6 +512,42 @@ export default function AdminSettingsPage() {
                 <Switch label={`Email ${terms.people} who give an email address`} checked={notify.email} onChange={(e) => setNotify({ ...notify, email: e.target.checked })} />
                 <Switch label={`Text ${terms.people} who give a phone number`} checked={notify.sms} onChange={(e) => setNotify({ ...notify, sms: e.target.checked })} />
               </div>
+            </section>
+          )}
+
+          {section === 'arrivals' && (
+            <section aria-labelledby="s-arrivals">
+              <h2 id="s-arrivals">Booked arrivals</h2>
+              <p className="settings-lede">
+                When a {terms.person} with an appointment checks in on time, they take their place in line by their booked
+                time: anyone who arrived before that time stays ahead, anyone who arrived after it goes behind. Nobody who has
+                already been called is passed. Late arrivals join the line like everyone else.
+              </p>
+              <div className="settings-switches">
+                <Switch label={`Place booked ${terms.people} by their booked time`} checked={arrival.enabled} onChange={(e) => setArrival({ ...arrival, enabled: e.target.checked })} />
+              </div>
+              <label className="settings-field settings-narrow">
+                <span>On time from this many minutes before the booked time</span>
+                <input type="number" min={0} max={240} value={arrival.earlyMinutes} disabled={!arrival.enabled} onChange={(e) => setArrival({ ...arrival, earlyMinutes: minutesIn(e.target.value) })} />
+              </label>
+              <label className="settings-field settings-narrow">
+                <span>…until this many minutes after it</span>
+                <input type="number" min={0} max={240} value={arrival.lateMinutes} disabled={!arrival.enabled} onChange={(e) => setArrival({ ...arrival, lateMinutes: minutesIn(e.target.value) })} />
+                <small>Anyone arriving outside this window joins as a walk-in. 10 before and 15 after suits most clinics.</small>
+              </label>
+              <label className="settings-field">
+                <span>How many booked {terms.people} may go ahead of a walk-in who was already waiting</span>
+                <select value={arrival.maxBookedShare} disabled={!arrival.enabled} onChange={(e) => setArrival({ ...arrival, maxBookedShare: Number(e.target.value) })}>
+                  {(SHARE_CHOICES.some((c) => c.value === arrival.maxBookedShare)
+                    ? SHARE_CHOICES
+                    : [...SHARE_CHOICES, { value: arrival.maxBookedShare, label: `${arrival.maxBookedShare}% booked` }]
+                  ).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+                <small>Keeps walk-ins moving when several booked patients arrive together.</small>
+              </label>
+              {!arrival.enabled && (
+                <p className="settings-note">Off: appointments checked in by staff go ahead of walk-ins, and appointments checked in from a connected system join by arrival.</p>
+              )}
             </section>
           )}
 

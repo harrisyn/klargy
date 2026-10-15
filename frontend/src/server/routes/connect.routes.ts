@@ -3,7 +3,7 @@ import { limits } from '../middleware/rateLimit.middleware';
 import { authenticateIntegration, requireScope } from '../middleware/integrationAuth.middleware';
 import { getMe, registerIntegration, putCatalog, getCatalog, getMappings } from '../controllers/connect.controller';
 import { putPatient, postEntry, postEntryByRef, getEntryByRef, listEntries, postServingLink } from '../controllers/connectQueue.controller';
-import { launchDesk } from '../controllers/connectDesk.controller';
+import { launchDesk, getStaffDesk } from '../controllers/connectDesk.controller';
 import { putAppointment, getAnalytics, postServiceStatus } from '../controllers/connectJourney.controller';
 
 // Klargy Connect v1 (docs/connect/v1.md): called by other systems with an
@@ -26,6 +26,8 @@ router.get('/entries/by-ref/:type/:id', requireScope('entries:read'), getEntryBy
 router.post('/entries/by-ref/:type/:id/:action', requireScope('entries:write'), postEntryByRef);
 
 router.post('/desk/launch', requireScope('desk:launch'), launchDesk);
+// Where a staff member is signed in now (the room a missed servicepoint.opened would have reported).
+router.get('/staff/:staffRef/desk', requireScope('desk:launch'), getStaffDesk);
 
 // Phase 5: journey automation
 router.put('/appointments/:appointmentRef', requireScope('appointments:write'), putAppointment);

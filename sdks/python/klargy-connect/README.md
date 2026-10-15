@@ -72,6 +72,7 @@ async with KlargyConnect("https://acme.klargy.com", "klg_live_...") as klargy:
 | `get_entry_by_ref(ref_type, ref_id, service=None)` | `GET /entries/by-ref/{type}/{id}[?service=]` |
 | `list_entries(updated_since, visit=None)` / `iter_entries(...)` | `GET /entries` (one page / every page) |
 | `launch_desk(body)` | `POST /desk/launch` |
+| `get_staff_desk(staff_ref)` | `GET /staff/{staffRef}/desk` |
 | `upsert_appointment(appointment_ref, body)` | `PUT /appointments/{ref}` |
 | `get_analytics(from_=, to=, location=, service=)` | `GET /analytics` |
 | `set_service_status(service, body)` | `POST /services/{service}/status` |

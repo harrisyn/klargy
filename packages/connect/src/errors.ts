@@ -26,6 +26,8 @@ export const CONNECT_ERROR_CODES = [
   // Desk launch
   'ORIGIN_NOT_ALLOWED',
   'STAFF_INACTIVE',
+  // GET /staff/{staffRef}/desk
+  'STAFF_NOT_MAPPED',
   // Analytics
   'LOCATION_NOT_MAPPED',
 ] as const;

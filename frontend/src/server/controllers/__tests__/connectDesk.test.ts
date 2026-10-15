@@ -36,6 +36,7 @@ import {
   exchangeDeskLaunch,
   getLaunchDesk,
   getLaunchEntry,
+  getStaffDesk,
   hashLaunchCode,
   LAUNCH_TTL_MS,
 } from '../connectDesk.controller';
@@ -338,5 +339,57 @@ describe('desk lookups for a launched session', () => {
   it('is only for the person the launch signed in', async () => {
     const { status } = await call(getLaunchDesk, { launchId: 'launch1', instanceId: 'inst1' }, 'someone-else');
     expect(status).toBe(404);
+  });
+});
+
+describe('GET /staff/{staffRef}/desk', () => {
+  async function staffDesk(staffRef: string) {
+    const res = makeRes();
+    const next = vi.fn();
+    await getStaffDesk({ integration, params: { staffRef } } as any, res, next);
+    if (next.mock.calls.length) throw next.mock.calls[0][0];
+    return { status: res.status.mock.calls[0]?.[0] ?? 200, body: res.json.mock.calls[0]?.[0] };
+  }
+
+  beforeEach(() => {
+    refs.push({ resourceType: 'staff', resourceId: 'u1', externalId: 'DR1' }, { resourceType: 'service', resourceId: 's1', externalId: 'clinic-1' });
+    (prisma.externalReference.findMany as any).mockImplementation(async ({ where }: any) =>
+      refs
+        .filter((r) => where.OR.some((o: any) => o.resourceType === r.resourceType && o.resourceId === r.resourceId))
+        .map((r) => ({ resourceType: r.resourceType, externalId: r.externalId }))
+    );
+    (prisma.user.findFirst as any).mockImplementation(async ({ where }: any) => (where.id === 'u1' ? { id: 'u1' } : null));
+  });
+
+  it('returns the room the mapped practitioner is signed in to, with the EMR’s ids', async () => {
+    const occupiedAt = new Date('2026-10-15T09:02:11Z');
+    (prisma.servicePointInstance.findFirst as any).mockResolvedValue({
+      id: 'd1', displayName: null, instanceNumber: 1, occupiedAt,
+      servicePointService: { serviceId: 's1', servicePoint: { id: 'sp1', name: 'Consulting Room 3', displayName: null, capacity: 1 } },
+    });
+    const { status, body } = await staffDesk('DR1');
+    expect(status).toBe(200);
+    expect(body).toEqual({
+      servicePoint: { id: 'sp1', ref: 'ROOM3', name: 'Consulting Room 3', serviceId: 's1', serviceRef: 'clinic-1' },
+      desk: { id: 'd1', name: 'Consulting Room 3' },
+      signedInAt: occupiedAt.toISOString(),
+    });
+    const query = (prisma.servicePointInstance.findFirst as any).mock.calls[0][0];
+    expect(query.where).toMatchObject({ occupiedByUserId: 'u1', isOccupied: true, isActive: true });
+    expect(query.orderBy).toEqual({ occupiedAt: 'desc' });
+    expect((prisma.user.findFirst as any).mock.calls[0][0].where).toMatchObject({ id: 'u1', organizationId: 'org1' });
+  });
+
+  it('answers servicePoint null when they are in no room', async () => {
+    (prisma.servicePointInstance.findFirst as any).mockResolvedValue(null);
+    expect((await staffDesk('DR1')).body).toEqual({ servicePoint: null, desk: null, signedInAt: null });
+  });
+
+  it('accepts Klargy’s own user id, and answers 404 STAFF_NOT_MAPPED for anyone else', async () => {
+    (prisma.servicePointInstance.findFirst as any).mockResolvedValue(null);
+    expect((await staffDesk('u1')).status).toBe(200);
+    const unknown = await staffDesk('DR9');
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.code).toBe('STAFF_NOT_MAPPED');
   });
 });

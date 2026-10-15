@@ -5,7 +5,7 @@ import { ArrowRightLeft, BellRing, Check, ChevronDown, ChevronRight, Ellipsis, L
 import api from '@/api/client';
 import { Badge } from '@/components/ui';
 import type { Desk, DeskEntry, DeskInstance } from './useDesk';
-import { deskLabel, minutesAgo, personName } from './useDesk';
+import { bookedLabel, bookedTitle, deskLabel, minutesAgo, personName } from './useDesk';
 import { useDeskRooms, type DeskRoomGroup } from './DeskPicker';
 
 /**
@@ -311,6 +311,7 @@ function PickRow({ entry, desk, disabled, onCall }: { entry: DeskEntry; desk: De
     <li className="desk-bar-pick-row" data-state={held ? 'held' : unpaid ? 'unpaid' : 'waiting'}>
       <b>{entry.ticketNumber}</b>
       <span className="desk-bar-pick-name">{personName(entry) || `${desk.terms.Person} ${entry.ticketNumber}`}</span>
+      {entry.bookedFor && <Badge tone="neutral" title={bookedTitle(entry)}>{bookedLabel(entry)}</Badge>}
       {held ? (
         <Badge tone="primary">{heldHere ? 'On hold here' : 'On hold'}</Badge>
       ) : unpaid ? (

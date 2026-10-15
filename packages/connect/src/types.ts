@@ -278,6 +278,26 @@ export interface DeskLaunchResult {
   staff: { klargyId: string; created: boolean };
 }
 
+/** `GET /staff/{staffRef}/desk`: the room a staff member is signed in to now. */
+export interface StaffDesk {
+  /** The room (Klargy service point), or null when they are signed in to none. */
+  servicePoint: {
+    /** Klargy's service point id. */
+    id: string;
+    /** The EMR's id for it (its `service_point` mapping), or null. */
+    ref: string | null;
+    name: string;
+    /** The Klargy service the desk serves. */
+    serviceId: string;
+    /** The EMR's id for that service (its `service` mapping), or null. */
+    serviceRef: string | null;
+  } | null;
+  /** The desk (one of the room's desks) they sit at, or null. */
+  desk: { id: string; name: string } | null;
+  /** When they signed in to it (ISO time), or null. */
+  signedInAt: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 5: appointments, analytics, service status
 // ---------------------------------------------------------------------------

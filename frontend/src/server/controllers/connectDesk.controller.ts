@@ -200,6 +200,70 @@ export const launchDesk = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+/**
+ * GET /connect/v1/staff/{staffRef}/desk: the room (service point) the staff
+ * member is signed in to now, so the EMR can check it without relying on
+ * having seen a servicepoint.opened webhook. `staffRef` is the EMR's
+ * practitioner id (its `staff` mapping); Klargy's own user id is also
+ * accepted. When they are signed in to several desks, the latest one.
+ */
+export const getStaffDesk = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const integration: Caller = { id: req.integration!.id, organizationId: req.integration!.organizationId };
+    const staffRef = text(req.params.staffRef, 'staffRef')!;
+    const mapped = await klargyIdFor(integration.id, 'staff', staffRef);
+    const user = await prisma.user.findFirst({
+      where: { id: mapped ?? staffRef, organizationId: integration.organizationId, role: { notIn: ['PATIENT', 'SUPER_ADMIN'] } },
+      select: { id: true },
+    });
+    if (!user) throw new ConnectError('That staff member isn’t matched to anyone in Klargy', 404, 'STAFF_NOT_MAPPED');
+
+    const desk = await prisma.servicePointInstance.findFirst({
+      where: {
+        occupiedByUserId: user.id,
+        isOccupied: true,
+        isActive: true,
+        servicePointService: { isActive: true, servicePoint: { isActive: true, organizationId: integration.organizationId } },
+      },
+      orderBy: { occupiedAt: 'desc' },
+      select: {
+        id: true,
+        displayName: true,
+        instanceNumber: true,
+        occupiedAt: true,
+        servicePointService: {
+          select: { serviceId: true, servicePoint: { select: { id: true, name: true, displayName: true, capacity: true } } },
+        },
+      },
+    });
+    if (!desk) return res.json({ servicePoint: null, desk: null, signedInAt: null });
+
+    const point = desk.servicePointService.servicePoint;
+    const serviceId = desk.servicePointService.serviceId;
+    const refs = await prisma.externalReference.findMany({
+      where: {
+        integrationId: integration.id,
+        OR: [
+          { resourceType: 'service_point', resourceId: point.id },
+          { resourceType: 'service', resourceId: serviceId },
+        ],
+      },
+      select: { resourceType: true, externalId: true },
+    });
+    const refOf = (type: string) => refs.find((r) => r.resourceType === type)?.externalId ?? null;
+    res.json({
+      servicePoint: { id: point.id, ref: refOf('service_point'), name: point.name, serviceId, serviceRef: refOf('service') },
+      desk: {
+        id: desk.id,
+        name: desk.displayName || (point.capacity > 1 ? `${point.displayName || point.name} ${desk.instanceNumber}` : point.displayName || point.name),
+      },
+      signedInAt: desk.occupiedAt ? desk.occupiedAt.toISOString() : null,
+    });
+  } catch (error) {
+    handle(error, res, next);
+  }
+};
+
 const invalidCode = (res: Response) =>
   res.status(400).json({ error: 'This desk link has expired or was already used. Open the desk again from your EMR.', code: 'INVALID_LAUNCH_CODE' });
 

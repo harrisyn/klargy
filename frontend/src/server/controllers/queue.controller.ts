@@ -4,9 +4,10 @@ import { screenName } from '../lib/screenName';
 import { estimateWaitMinutes } from '../services/waitEstimate';
 import { emitToQueue, emitToService, emitToLocation, emitToQueueAndLocation, SOCKET_EVENTS } from '../lib/realtime';
 import { generateTicketNumber, getNextSequence, generateQRData } from '../utils/ticket';
-import { getStartOfDay, startOfLocalDate, validTimeZone } from '../utils/date';
+import { clockTime, getStartOfDay, startOfLocalDate, validTimeZone } from '../utils/date';
 import { v4 as uuidv4 } from 'uuid';
-import { CALLABLE_WHERE, WAITING_ORDER, computePosition, notifyEntry } from '../services/notifications.service';
+import { CALLABLE_WHERE, computePosition, notifyEntry, queueLineRanks, waitingLine } from '../services/notifications.service';
+import { applyLineOrder } from '../services/queueOrder';
 import {
   recordQueueEvent,
   startJourney,
@@ -94,6 +95,8 @@ export const getQueue = async (req: Request, res: Response, next: NextFunction) 
     if (!queue) {
       return res.status(404).json({ error: 'Queue not found' });
     }
+    // The line in call order (booked patients placed by booked time).
+    queue.entries = applyLineOrder(queue.entries, await queueLineRanks(queue.id));
 
     // Calculate queue stats
     const waiting = queue.entries.filter(e => e.status === 'WAITING').length;
@@ -158,11 +161,7 @@ export const callNext = async (req: Request, res: Response, next: NextFunction) 
     // Claim atomically (see callNextWithServicePoint).
     let claimedId: string | null = null;
     for (let attempt = 0; attempt < 5 && !claimedId; attempt++) {
-      const candidate = await prisma.queueEntry.findFirst({
-        where: { queueId: id, ...CALLABLE_WHERE },
-        orderBy: WAITING_ORDER,
-        select: { id: true, joinedAt: true },
-      });
+      const [candidate] = await waitingLine(id);
       if (!candidate) break;
       const claimed = await prisma.queueEntry.updateMany({
         where: { id: candidate.id, ...CALLABLE_WHERE },
@@ -590,14 +589,10 @@ export const getPublicStatus = async (req: Request, res: Response, next: NextFun
     const currentlyServing = allEntries.find(e => e.status === 'SERVING');
 
     // Calculate position for waiting entries
+    // (the same order staff call people, booked patients placed by booked time)
     let position: number | null = null;
     if (entry.status === 'WAITING' && !entry.heldAt && !entry.awaitingClearance) {
-      position = allEntries.filter(e => 
-        e.status === 'WAITING' && !e.heldAt && !e.awaitingClearance && (
-          e.priority > entry.priority ||
-          (e.priority === entry.priority && e.joinedAt < entry.joinedAt)
-        )
-      ).length + 1;
+      position = (await queueLineRanks(entry.queueId)).get(entry.id) ?? null;
     }
 
     // Estimate wait time based on position and service configuration
@@ -648,6 +643,15 @@ export const getPublicStatus = async (req: Request, res: Response, next: NextFun
       entryId,
       joinedAt: entry.joinedAt,
       calledAt: entry.calledAt,
+      // A booked patient: their appointment time ("Booked 10:30") in the
+      // location's time zone, and whether they were placed by it.
+      booked: entry.bookedFor
+        ? {
+            at: entry.bookedFor,
+            time: clockTime(entry.bookedFor, queue.service.location.timezone),
+            placed: !!entry.bookedPlaceAt,
+          }
+        : null,
       userName: `${entry.user.firstName} ${entry.user.lastName}`.trim(),
       messages,
     });
@@ -677,7 +681,8 @@ export const reorderEntries = async (req: Request, res: Response, next: NextFunc
       entries.map(({ id: entryId, sortOrder }: { id: string; sortOrder: number }) =>
         prisma.queueEntry.update({
           where: { id: entryId },
-          data: { sortOrder },
+          // A hand-made order wins over booked-time placement.
+          data: { sortOrder, bookedPlaceAt: null },
         })
       )
     );
@@ -776,7 +781,7 @@ export const getQueueEntriesForOperator = async (req: Request, res: Response, ne
     // On hold first (they keep their place at the front), then the line,
     // then anyone still waiting for payment (not callable yet).
     const rank = (e: typeof queue.entries[number]) => (e.heldAt ? 0 : e.awaitingClearance ? 2 : 1);
-    const waiting = queue.entries
+    const waiting = applyLineOrder(queue.entries, await queueLineRanks(queue.id))
       .filter(e => e.status === 'WAITING')
       .map((e, i) => ({ e, i }))
       .sort((a, b) => rank(a.e) - rank(b.e) || a.i - b.i)
@@ -1212,7 +1217,6 @@ export const getLocationQueues = async (req: Request, res: Response, next: NextF
                   }
                 }
               },
-              take: 20, // Limit entries per queue for display
             },
             _count: {
               select: { entries: true }
@@ -1304,7 +1308,7 @@ export const getLocationQueues = async (req: Request, res: Response, next: NextF
         }
       }
 
-      const entries = queue?.entries || [];
+      const entries = queue ? applyLineOrder(queue.entries, await queueLineRanks(queue.id)) : [];
       const serving = entries.filter(e => e.status === 'SERVING');
       const waiting = entries.filter(e => e.status === 'WAITING');
       
