@@ -14,14 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-# NEXT_PUBLIC_* values are inlined at build time - pass them as build args.
-ARG NEXT_PUBLIC_APP_DOMAIN
-ARG NEXT_PUBLIC_APP_NAME
-ARG NEXT_PUBLIC_REALTIME_KEY
-ARG NEXT_PUBLIC_REALTIME_HOST
-ARG NEXT_PUBLIC_REALTIME_PORT
-ARG NEXT_PUBLIC_REALTIME_TLS
-ARG NEXT_PUBLIC_REALTIME_CLUSTER
+# Public settings (app name/domain, realtime) are read at runtime, not build time.
 RUN npm run build
 
 FROM node:20-slim AS runner

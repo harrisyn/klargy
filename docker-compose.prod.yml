@@ -1,0 +1,51 @@
+# Production: run the image built by .github/workflows/docker-publish.yml.
+# Copy .env.example (or set these in your host/orchestrator) and run:
+#   docker compose -f docker-compose.prod.yml up -d
+# Postgres and SMTP are external. The container applies migrations on start.
+# Public settings (APP_NAME, APP_DOMAIN, REALTIME_PUBLIC_*) are read at runtime, so the same
+# image works for any domain. Soketi provides real-time (swap for Pusher/Ably
+# by dropping the service and pointing the REALTIME_* variables at them).
+services:
+  app:
+    image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME}/queue-management:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:?}
+      CRON_SECRET: ${CRON_SECRET:?}
+      APP_URL: ${APP_URL:?}
+      APP_DOMAIN: ${APP_DOMAIN:?}
+      APP_NAME: ${APP_NAME:-BetaPosition}
+      SMTP_HOST: ${SMTP_HOST:?}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      # Real-time via the Soketi service below. The server publishes over the
+      # internal network; browsers connect to the public host/port/TLS, so
+      # expose or proxy soketi (6001) and set REALTIME_PUBLIC_HOST.
+      REALTIME_APP_ID: ${REALTIME_APP_ID:?}
+      REALTIME_KEY: ${REALTIME_KEY:?}
+      REALTIME_SECRET: ${REALTIME_SECRET:?}
+      REALTIME_HOST: soketi
+      REALTIME_PORT: "6001"
+      REALTIME_TLS: "false"
+      REALTIME_PUBLIC_HOST: ${REALTIME_PUBLIC_HOST:?}
+      REALTIME_PUBLIC_PORT: ${REALTIME_PUBLIC_PORT:-443}
+      REALTIME_PUBLIC_TLS: ${REALTIME_PUBLIC_TLS:-true}
+    depends_on:
+      - soketi
+
+  soketi:
+    image: quay.io/soketi/soketi:1.6-16-debian
+    restart: unless-stopped
+    environment:
+      SOKETI_DEFAULT_APP_ID: ${REALTIME_APP_ID:?}
+      SOKETI_DEFAULT_APP_KEY: ${REALTIME_KEY:?}
+      SOKETI_DEFAULT_APP_SECRET: ${REALTIME_SECRET:?}
+    ports:
+      - "6001:6001"

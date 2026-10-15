@@ -28,8 +28,8 @@ Postgres, and background jobs run on Vercel Cron.
 3. **Set environment variables.** Every variable is described in
    `frontend/.env.example`. At minimum set:
    `DATABASE_URL`, `JWT_SECRET`, `MASTER_ENCRYPTION_KEY`, `CRON_SECRET`,
-   `APP_URL`, `NEXT_PUBLIC_APP_DOMAIN`, `APP_NAME`, `NEXT_PUBLIC_APP_NAME`,
-   the SMTP settings, and the `REALTIME_*` / `NEXT_PUBLIC_REALTIME_*` pair.
+   `APP_URL`, `APP_DOMAIN`, `APP_NAME`, the SMTP settings, and the
+   `REALTIME_*` / `REALTIME_PUBLIC_*` values.
    - Moving an existing database? Keep the **same** `MASTER_ENCRYPTION_KEY`,
      or saved payment keys, integration credentials and webhook secrets become
      unreadable.
@@ -76,16 +76,13 @@ and wait-spike alerts are statistical and work without any provider.
 start and serves the app on port 3000:
 
 ```bash
-docker build -t queue-app \
-  --build-arg NEXT_PUBLIC_APP_DOMAIN=yourapp.com \
-  --build-arg NEXT_PUBLIC_APP_NAME=BetaPosition \
-  --build-arg NEXT_PUBLIC_REALTIME_KEY=... \
-  frontend
+docker build -t queue-app frontend
 docker run -p 3000:3000 --env-file .env queue-app
 ```
 
-`NEXT_PUBLIC_*` values are compiled into the browser bundle, so they must be
-passed as build args. Everything else is read at runtime. For real-time,
+Nothing is compiled into the image: app name, domain and real-time settings are
+all read from the environment at runtime, so one image works anywhere (CI
+publishes it to Docker Hub; see `docker-compose.prod.yml`). For real-time,
 either use Pusher/Ably or run [Soketi](https://soketi.app) next to the app, as
 `docker-compose.yml` does. Put a TLS-terminating proxy that supports wildcard
 and on-demand certificates (Caddy works well) in front for tenant subdomains

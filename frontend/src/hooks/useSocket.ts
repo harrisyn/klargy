@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type Pusher from 'pusher-js';
 import type { Channel } from 'pusher-js';
+import { getRuntimeConfig } from '@/lib/runtimeConfig';
 
 /**
  * Real-time queue updates over the Pusher Channels protocol (Pusher, Ably,
@@ -15,7 +16,6 @@ import type { Channel } from 'pusher-js';
  * `queue.updated` every POLL_MS so pages still refresh.
  */
 
-const KEY = process.env.NEXT_PUBLIC_REALTIME_KEY;
 const POLL_MS = 15000;
 
 const EVENTS = ['queue.updated', 'entry.status_changed', 'notification.sent', 'serviceflow.transition', 'slot.released', 'location.updated'] as const;
@@ -25,21 +25,22 @@ type Handler = (data: any) => void;
 let pusherPromise: Promise<Pusher> | null = null;
 
 function getPusher(): Promise<Pusher> | null {
-  if (!KEY || typeof window === 'undefined') return null;
+  const cfg = getRuntimeConfig();
+  if (!cfg.realtimeKey || typeof window === 'undefined') return null;
   if (!pusherPromise) {
     pusherPromise = import('pusher-js').then(({ default: PusherClient }) => {
-      const host = process.env.NEXT_PUBLIC_REALTIME_HOST;
-      return new PusherClient(KEY, host
+      const host = cfg.realtimeHost;
+      return new PusherClient(cfg.realtimeKey, host
         ? {
-            cluster: process.env.NEXT_PUBLIC_REALTIME_CLUSTER || 'mt1',
+            cluster: cfg.realtimeCluster,
             wsHost: host,
-            wsPort: Number(process.env.NEXT_PUBLIC_REALTIME_PORT || 6001),
-            wssPort: Number(process.env.NEXT_PUBLIC_REALTIME_PORT || 443),
-            forceTLS: process.env.NEXT_PUBLIC_REALTIME_TLS === 'true',
+            wsPort: Number(cfg.realtimePort || 6001),
+            wssPort: Number(cfg.realtimePort || 443),
+            forceTLS: cfg.realtimeTls,
             enabledTransports: ['ws', 'wss'],
             disableStats: true,
           }
-        : { cluster: process.env.NEXT_PUBLIC_REALTIME_CLUSTER || 'mt1' });
+        : { cluster: cfg.realtimeCluster });
     });
   }
   return pusherPromise;

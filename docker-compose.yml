@@ -25,8 +25,7 @@ services:
       # Product name shown across the UI and in emails - the single place to
       # rebrand the app is APP_NAME in the repo-root .env.
       APP_NAME: ${APP_NAME:-BetaPosition}
-      NEXT_PUBLIC_APP_NAME: ${APP_NAME:-BetaPosition}
-      NEXT_PUBLIC_APP_DOMAIN: ${NEXT_PUBLIC_APP_DOMAIN:-localhost:8003}
+      APP_DOMAIN: ${APP_DOMAIN:-localhost:8003}
       # SMTP -> Mailpit in this compose setup
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}
@@ -42,10 +41,9 @@ services:
       REALTIME_HOST: soketi
       REALTIME_PORT: "6001"
       REALTIME_TLS: "false"
-      NEXT_PUBLIC_REALTIME_KEY: app-key
-      NEXT_PUBLIC_REALTIME_HOST: localhost
-      NEXT_PUBLIC_REALTIME_PORT: "6001"
-      NEXT_PUBLIC_REALTIME_TLS: "false"
+      REALTIME_PUBLIC_HOST: localhost
+      REALTIME_PUBLIC_PORT: "6001"
+      REALTIME_PUBLIC_TLS: "false"
       # AI-assisted analytics fallback config (normally set by the superadmin
       # under AI Providers). AI_PROVIDER: anthropic | openai | gemini | openai_compatible
       AI_PROVIDER: ${AI_PROVIDER:-anthropic}

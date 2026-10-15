@@ -37,7 +37,7 @@ Branch: `arch-review-fixes`. Origin: architecture review of 2026-09-25.
 - [x] Email + SMS channels (Twilio via env; console in dev), metered with EMAIL/SMS credits
 - [x] Notification settings UI: Settings → Notifications tab
 - [x] Forgot-password / reset-password flow (`/forgot-password`, `/reset-password`; single-use 1h tokens, link goes to the user's own subdomain; verified via Mailpit)
-- [x] `/privacy` and `/terms` pages (describe what the product actually does; operator must add legal entity + `NEXT_PUBLIC_LEGAL_CONTACT_EMAIL`)
+- [x] `/privacy` and `/terms` pages (describe what the product actually does; operator must add legal entity + `LEGAL_CONTACT_EMAIL`)
 - [x] Audit log backend (`AuditLog`, `GET /orgs/:id/audit-logs`) for join/call/serve/cancel/no-show/transfer/reorder/status + appointments
 - [x] Audit log page (`/admin/audit-log`, org admins)
 - [x] Outbound webhooks backend: signed (HMAC-SHA256), retried with backoff via `/cron/frequent`, SSRF-guarded; verified by `tests/queue-flow-smoke.js`

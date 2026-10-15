@@ -1,4 +1,6 @@
-const APP_DOMAIN = process.env.NEXT_PUBLIC_APP_DOMAIN || 'localhost:8003';
+import { getRuntimeConfig } from './runtimeConfig';
+
+const APP_DOMAIN = getRuntimeConfig().appDomain;
 
 /**
  * Extracts the subdomain from a Host header value, relative to APP_DOMAIN.

@@ -1,12 +1,13 @@
 import React from 'react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/appConfig';
+import { getRuntimeConfig } from '@/lib/runtimeConfig';
 
 // Shared shell for /privacy and /terms. The copy on those pages describes
 // what this product actually stores and does; the operator still needs to
 // add their legal entity, jurisdiction and contact details before launch
 // (LEGAL_CONTACT_EMAIL fills the contact line).
-export const LEGAL_CONTACT = process.env.NEXT_PUBLIC_LEGAL_CONTACT_EMAIL || '';
+export const LEGAL_CONTACT = getRuntimeConfig().legalContactEmail;
 
 export default function LegalPage({ title, updated, children }: { title: string; updated: string; children: React.ReactNode }) {
   return (

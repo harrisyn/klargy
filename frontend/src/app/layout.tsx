@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { connection } from 'next/server';
 import { Bricolage_Grotesque, Public_Sans } from 'next/font/google';
 import './globals.css';
 import './settings.css';
@@ -6,7 +7,7 @@ import './desk.css';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import ToastHost from '@/components/ui/ToastHost';
-import { APP_NAME } from '@/lib/appConfig';
+import { readRuntimeConfigFromEnv } from '@/lib/runtimeConfig';
 
 // Two families: Public Sans for UI/body (plain, highly legible - civic and
 // healthcare signage heritage) and Bricolage Grotesque for headlines and big
@@ -14,18 +15,28 @@ import { APP_NAME } from '@/lib/appConfig';
 const bodyFont = Public_Sans({ subsets: ['latin'], variable: '--font-body', display: 'swap' });
 const displayFont = Bricolage_Grotesque({ subsets: ['latin'], variable: '--font-headline', display: 'swap', axes: ['opsz', 'wdth'] });
 
-export const metadata: Metadata = {
-  title: APP_NAME,
-  description: `Professional queue management system for healthcare and services, powered by ${APP_NAME}`,
-};
+export async function generateMetadata(): Promise<Metadata> {
+  await connection();
+  const { appName } = readRuntimeConfigFromEnv();
+  return {
+    title: appName,
+    description: `Professional queue management system for healthcare and services, powered by ${appName}`,
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Render per request so the runtime config below reflects the live env.
+  await connection();
+  const runtimeConfig = JSON.stringify(readRuntimeConfigFromEnv()).replace(/</g, '\\u003c');
   return (
     <html lang="en" className={`${bodyFont.variable} ${displayFont.variable}`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `window.__RUNTIME_CONFIG__=${runtimeConfig};` }} />
+      </head>
       <body>
         {/*
           Cross-subdomain impersonation handoff. localStorage/sessionStorage
