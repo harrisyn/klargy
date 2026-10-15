@@ -28,7 +28,11 @@ const entry = (ticketNumber: string, extra: Partial<DeskEntry> = {}): DeskEntry 
 
 function fakeDesk(overrides: Partial<Desk> = {}): Desk {
   const noop = vi.fn();
+  const waiting = (overrides.waiting ?? []) as Desk['waiting'];
   return {
+    callable: waiting.filter((e) => !e.heldAt && !e.awaitingClearance),
+    hold: noop,
+    clear: noop,
     ready: true,
     desk: { instanceId: 'r1', serviceId: 'svc-opd', locationId: 'loc1', label: 'Room 1', serviceName: 'OPD', userId: 'u1' },
     data: { queue: { id: 'q1', status: 'ACTIVE' }, serving: [], waiting: [], nextServices: [] },
@@ -138,5 +142,32 @@ describe('DeskBarView', () => {
     expect(html).toContain('Laboratory');
     expect(html).toContain('No, they’re finished');
     expect(html).toContain('G011 marked as not here.');
+  });
+
+  it('puts the person being served on hold from the row', () => {
+    const html = render(fakeDesk({ current: entry('G012', { status: 'SERVING' }) }));
+    expect(html).toContain('Hold');
+    expect(html).toContain('aria-label="Call a specific patient"');
+  });
+
+  it('lists who can be called by hand: on hold first, awaiting payment marked and not callable', () => {
+    const waiting = [
+      entry('G010', { heldAt: new Date().toISOString(), deskInstanceId: 'r1' }),
+      entry('G013'),
+      entry('C001', { awaitingClearance: true }),
+    ];
+    const html = render(fakeDesk({ waiting }), { initialPanel: 'pick' });
+    expect(html).toContain('aria-label="Call a specific patient"');
+    expect(html).toContain('On hold here');
+    expect(html).toContain('Call back');
+    expect(html).toContain('Awaiting payment');
+    expect(html).toContain('Mark paid');
+    expect(html.indexOf('G010')).toBeLessThan(html.indexOf('C001'));
+  });
+
+  it('turns off Call next when everyone waiting is on hold or awaiting payment', () => {
+    const html = render(fakeDesk({ waiting: [entry('C001', { awaitingClearance: true })] }));
+    expect(html).toContain('1 waiting');
+    expect(html).toMatch(/desk-bar-call" disabled=""/);
   });
 });

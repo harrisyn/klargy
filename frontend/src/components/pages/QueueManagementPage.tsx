@@ -7,7 +7,7 @@ import { Bell, GripVertical, LogOut, PictureInPicture2, RefreshCw, Repeat, Code2
 import api from '@/api/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 import Layout from '@/components/Layout';
-import { Button, Modal, PageHeader } from '@/components/ui';
+import { Badge, Button, Modal, PageHeader } from '@/components/ui';
 import WaitAlerts from '@/components/ai/WaitAlerts';
 import DeskPanel, { useDeskShortcuts } from '@/components/desk/DeskPanel';
 import DeskPicker from '@/components/desk/DeskPicker';
@@ -256,8 +256,18 @@ export default function QueueManagementPage() {
                     <span className="desk-pos">{i + 1}</span>
                     <b>{e.ticketNumber}</b>
                     <span className="desk-queue-name">{personName(e)}</span>
-                    <small>{minutesAgo(e.joinedAt)} min</small>
-                    <button type="button" className="desk-call-one" onClick={() => desk.callNext(e.id)} disabled={!!desk.busy} title={`Call ${e.ticketNumber} now`}>Call</button>
+                    {e.heldAt ? (
+                      <Badge tone="primary">On hold</Badge>
+                    ) : e.awaitingClearance ? (
+                      <Badge tone="warning">Awaiting payment</Badge>
+                    ) : (
+                      <small>{minutesAgo(e.joinedAt)} min</small>
+                    )}
+                    {e.awaitingClearance ? (
+                      <button type="button" className="desk-call-one" onClick={() => desk.clear(e)} disabled={!!desk.busy} title="They’ve paid: let them into the line">Mark paid</button>
+                    ) : (
+                      <button type="button" className="desk-call-one" onClick={() => desk.callNext(e.id)} disabled={!!desk.busy} title={e.heldAt ? 'Call them back' : `Call ${e.ticketNumber} now`}>{e.heldAt ? 'Call back' : 'Call'}</button>
+                    )}
                   </li>
                 ))}
               </ol>

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { BellRing, Check, ChevronRight, Loader2, Megaphone, UserX } from 'lucide-react';
+import { BellRing, Check, ChevronRight, Loader2, Megaphone, PauseCircle, UserX } from 'lucide-react';
 import type { Desk } from './useDesk';
 import { minutesAgo, personName } from './useDesk';
 import PatientCard from './PatientCard';
@@ -22,8 +22,8 @@ export default function DeskPanel({
   /** The connected EMR's record for the person being served (when there is one). */
   patientCard?: boolean;
 }) {
-  const { current, waiting, busy, error, notice, afterComplete, terms } = desk;
-  const next = waiting[0];
+  const { current, waiting, callable, busy, error, notice, afterComplete, terms } = desk;
+  const next = callable[0];
 
   return (
     <div className="desk-panel" data-compact={compact}>
@@ -43,6 +43,9 @@ export default function DeskPanel({
             </button>
             <button type="button" className="desk-btn" onClick={desk.recall} disabled={!!busy} title="Show and announce the ticket again">
               <Megaphone size={16} /> Call again{!compact && <kbd>A</kbd>}
+            </button>
+            <button type="button" className="desk-btn" onClick={desk.hold} disabled={!!busy} title="Off the desk for now; they keep their place at the front">
+              <PauseCircle size={16} /> Hold
             </button>
             <button type="button" className="desk-btn desk-btn-quiet" onClick={desk.noShow} disabled={!!busy} title="They didn’t come to the desk">
               <UserX size={16} /> Not here
@@ -75,14 +78,14 @@ export default function DeskPanel({
         type="button"
         className="desk-call"
         onClick={() => desk.callNext()}
-        disabled={!!busy || waiting.length === 0}
+        disabled={!!busy || callable.length === 0}
       >
         {busy === 'call' ? <Loader2 size={20} className="qf-spin" /> : <BellRing size={20} />}
         <span>
-          {waiting.length === 0 ? 'Nobody to call' : `Call next${next ? ` · ${next.ticketNumber}` : ''}`}
-          <small>{waiting.length} waiting</small>
+          {callable.length === 0 ? 'Nobody to call' : `Call next${next ? ` · ${next.ticketNumber}` : ''}`}
+          <small>{waiting.length} waiting{waiting.length > callable.length ? ` · ${waiting.length - callable.length} on hold or awaiting payment` : ''}</small>
         </span>
-        {!compact && waiting.length > 0 && <kbd>N</kbd>}
+        {!compact && callable.length > 0 && <kbd>N</kbd>}
       </button>
 
       {(error || notice) && (
@@ -101,7 +104,7 @@ export function useDeskShortcuts(desk: Desk, target: Document | null | undefined
       const el = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey || el?.closest('input, textarea, select, [contenteditable="true"]')) return;
       const key = e.key.toLowerCase();
-      if (key === 'n' && !desk.busy && desk.waiting.length > 0) { e.preventDefault(); desk.callNext(); }
+      if (key === 'n' && !desk.busy && desk.callable.length > 0) { e.preventDefault(); desk.callNext(); }
       if (key === 'd' && !desk.busy && desk.current) { e.preventDefault(); desk.complete(); }
       if (key === 'a' && !desk.busy && desk.current) { e.preventDefault(); desk.recall(); }
     };

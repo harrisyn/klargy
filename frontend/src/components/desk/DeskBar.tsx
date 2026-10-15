@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowRightLeft, BellRing, Check, ChevronRight, Ellipsis, Loader2, LogOut, Megaphone, UserX, X } from 'lucide-react';
+import { ArrowRightLeft, BellRing, Check, ChevronDown, ChevronRight, Ellipsis, Loader2, LogOut, Megaphone, PauseCircle, UserX, X } from 'lucide-react';
 import api from '@/api/client';
 import { Badge } from '@/components/ui';
-import type { Desk, DeskInstance } from './useDesk';
-import { deskLabel, personName } from './useDesk';
+import type { Desk, DeskEntry, DeskInstance } from './useDesk';
+import { deskLabel, minutesAgo, personName } from './useDesk';
 import { useDeskRooms, type DeskRoomGroup } from './DeskPicker';
 
 /**
@@ -34,7 +34,7 @@ export interface DeskBarRooms {
   choose: (inst: DeskInstance) => void | Promise<void>;
 }
 
-type Panel = 'transfer' | 'more' | null;
+type Panel = 'transfer' | 'more' | 'pick' | null;
 
 const roomOptionLabel = (inst: DeskInstance, userId: string | null) => {
   const taken = inst.isOccupied && inst.occupiedBy && inst.occupiedBy.id !== userId;
@@ -57,7 +57,7 @@ export function DeskBarView({
   onSignOut: () => void;
   initialPanel?: Panel;
 }) {
-  const { current, waiting, busy, error, notice, afterComplete, terms } = desk;
+  const { current, waiting, callable, busy, error, notice, afterComplete, terms } = desk;
   const [openPanel, setPanel] = useState<Panel>(initialPanel);
   // Transfer needs someone to transfer.
   const panel = openPanel === 'transfer' && !current ? null : openPanel;
@@ -68,7 +68,7 @@ export function DeskBarView({
   const [servicesFailed, setServicesFailed] = useState(false);
   const signedIn = !!desk.desk;
   const count = desk.data ? waiting.length : null;
-  const next = waiting[0];
+  const next = callable[0];
 
   const toggle = (which: Exclude<Panel, null>) => setPanel(panel === which ? null : which);
   const act = (fn: () => unknown) => () => { setPanel(null); fn(); };
@@ -135,16 +135,29 @@ export function DeskBarView({
             </Badge>
 
             <div className="desk-bar-actions">
-              <button
-                type="button"
-                className="desk-btn desk-btn-primary desk-bar-call"
-                onClick={act(() => desk.callNext())}
-                disabled={!!busy || waiting.length === 0}
-                title={next ? `Call ${next.ticketNumber}` : `Nobody is waiting`}
-              >
-                {busy === 'call' ? <Loader2 size={16} className="qf-spin" /> : <BellRing size={16} />}
-                <span>Call next</span>
-              </button>
+              <div className="desk-bar-split">
+                <button
+                  type="button"
+                  className="desk-btn desk-btn-primary desk-bar-call"
+                  onClick={act(() => desk.callNext())}
+                  disabled={!!busy || callable.length === 0}
+                  title={next ? `Call ${next.ticketNumber}` : waiting.length ? 'Nobody can be called yet' : 'Nobody is waiting'}
+                >
+                  {busy === 'call' ? <Loader2 size={16} className="qf-spin" /> : <BellRing size={16} />}
+                  <span>Call next</span>
+                </button>
+                <button
+                  type="button"
+                  className="desk-btn desk-btn-primary desk-bar-call desk-bar-pick"
+                  onClick={() => toggle('pick')}
+                  disabled={!!busy && panel !== 'pick'}
+                  aria-expanded={panel === 'pick'}
+                  aria-label={`Call a specific ${terms.person}`}
+                  title={`Call a specific ${terms.person}`}
+                >
+                  <ChevronDown size={16} />
+                </button>
+              </div>
               <button type="button" className="desk-btn" onClick={act(desk.recall)} disabled={!!busy || !current} title="Show and announce the ticket again">
                 {busy === 'recall' ? <Loader2 size={16} className="qf-spin" /> : <Megaphone size={16} />}
                 <span className="desk-bar-label">Recall</span>
@@ -152,6 +165,9 @@ export function DeskBarView({
               <button type="button" className="desk-btn" onClick={act(desk.complete)} disabled={!!busy || !current} title="Finished with them">
                 {busy === 'complete' ? <Loader2 size={16} className="qf-spin" /> : <Check size={16} />}
                 <span className="desk-bar-label">Complete</span>
+              </button>
+              <button type="button" className="desk-btn desk-bar-wide" onClick={act(desk.hold)} disabled={!!busy || !current} title="Off the desk for now; they keep their place at the front">
+                {busy === 'hold' ? <Loader2 size={16} className="qf-spin" /> : <PauseCircle size={16} />} <span className="desk-bar-label-wide">Hold</span>
               </button>
               <button type="button" className="desk-btn desk-btn-quiet desk-bar-wide" onClick={act(desk.noShow)} disabled={!!busy || !current} title="They didn’t come to the desk">
                 <UserX size={16} /> <span className="desk-bar-label-wide">No-show</span>
@@ -211,10 +227,30 @@ export function DeskBarView({
         </section>
       )}
 
+      {panel === 'pick' && signedIn && (
+        <section className="desk-bar-panel" aria-label={`Call a specific ${terms.person}`}>
+          {waiting.length === 0 ? (
+            <p className="desk-bar-muted">Nobody is waiting.</p>
+          ) : (
+            <>
+              <p>Call a specific {terms.person}{current ? ' (finish with the one you’re serving first, or put them on hold)' : ''}:</p>
+              <ul className="desk-bar-pick-list">
+                {waiting.map((e) => (
+                  <PickRow key={e.id} entry={e} desk={desk} disabled={!!busy || !!current} onCall={act(() => desk.callNext(e.id))} />
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
+
       {panel === 'more' && (
         <section className="desk-bar-panel desk-bar-menu" aria-label="More">
           {signedIn && (
             <div className="desk-bar-narrow">
+              <button type="button" className="desk-btn" onClick={act(desk.hold)} disabled={!!busy || !current}>
+                <PauseCircle size={16} /> Hold
+              </button>
               <button type="button" className="desk-btn desk-btn-quiet" onClick={act(desk.noShow)} disabled={!!busy || !current}>
                 <UserX size={16} /> No-show
               </button>
@@ -262,6 +298,36 @@ export function DeskBarView({
         <p className={rooms.problem || error ? 'desk-msg desk-msg-bad desk-bar-msg' : 'desk-msg desk-bar-msg'} role={rooms.problem || error ? 'alert' : 'status'}>{message}</p>
       )}
     </div>
+  );
+}
+
+/** One person in the "Call a specific patient" list: on hold, waiting, or
+ * awaiting payment (not callable until cleared). */
+function PickRow({ entry, desk, disabled, onCall }: { entry: DeskEntry; desk: Desk; disabled: boolean; onCall: () => void }) {
+  const held = !!entry.heldAt;
+  const unpaid = !!entry.awaitingClearance;
+  const heldHere = held && entry.deskInstanceId === desk.desk?.instanceId;
+  return (
+    <li className="desk-bar-pick-row" data-state={held ? 'held' : unpaid ? 'unpaid' : 'waiting'}>
+      <b>{entry.ticketNumber}</b>
+      <span className="desk-bar-pick-name">{personName(entry) || `${desk.terms.Person} ${entry.ticketNumber}`}</span>
+      {held ? (
+        <Badge tone="primary">{heldHere ? 'On hold here' : 'On hold'}</Badge>
+      ) : unpaid ? (
+        <Badge tone="warning">Awaiting payment</Badge>
+      ) : (
+        <small>{minutesAgo(entry.joinedAt)} min</small>
+      )}
+      {unpaid ? (
+        <button type="button" className="desk-btn desk-btn-quiet" onClick={() => desk.clear(entry)} disabled={!!desk.busy} title="They’ve paid: let them into the line">
+          Mark paid
+        </button>
+      ) : (
+        <button type="button" className="desk-btn" onClick={onCall} disabled={disabled} title={held ? 'Call them back to your room' : `Call ${entry.ticketNumber} now`}>
+          <BellRing size={15} /> {held ? 'Call back' : 'Call'}
+        </button>
+      )}
+    </li>
   );
 }
 
