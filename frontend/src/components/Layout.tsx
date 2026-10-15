@@ -37,6 +37,7 @@ import { useTerms } from '@/hooks/useTerms';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { buildAdminUrl } from '@/lib/subdomain';
 import { APP_NAME } from '@/lib/appConfig';
+import { BrandLogo } from '@/components/brand/BrandLogo';
 
 interface ImpersonationInfo {
   returnToken: string;
@@ -59,16 +60,6 @@ const ROLE_LABELS: Record<string, string> = {
   RECEPTIONIST: 'Receptionist',
   PATIENT: 'Visitor',
 };
-
-export function BrandMark({ size = 32 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <rect width="48" height="48" rx="12" fill="var(--primary-500)" />
-      <path d="M14 24C14 18.477 18.477 14 24 14V14C29.523 14 34 18.477 34 24V34H14V24Z" fill="white" fillOpacity="0.92" />
-      <circle cx="24" cy="22" r="4" fill="var(--primary-700)" />
-    </svg>
-  );
-}
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, logout, isAdmin, isStaff, isSuperAdmin } = useAuthContext();
@@ -208,9 +199,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
-        <Link href="/" className="app-brand">
-          <BrandMark size={34} />
-          <span>{APP_NAME}</span>
+        <Link href="/" className="app-brand" aria-label={`${APP_NAME} home`}>
+          <BrandLogo height={36} surface="dark" />
         </Link>
         {nav}
         {userBlock}
@@ -220,9 +210,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         <button type="button" className="app-icon-btn" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">
           <Menu size={20} />
         </button>
-        <Link href="/" className="app-brand app-brand-sm">
-          <BrandMark size={28} />
-          <span>{APP_NAME}</span>
+        <Link href="/" className="app-brand app-brand-sm" aria-label={`${APP_NAME} home`}>
+          <BrandLogo height={30} surface="dark" compactBelow={480} />
         </Link>
         <span className="app-avatar app-avatar-sm" aria-hidden="true">
           {user?.firstName?.[0]}{user?.lastName?.[0]}
@@ -234,8 +223,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           <div className="app-drawer" role="dialog" aria-label="Menu" onClick={(e) => e.stopPropagation()}>
             <div className="app-drawer-top">
               <span className="app-brand">
-                <BrandMark size={30} />
-                <span>{APP_NAME}</span>
+                <BrandLogo height={32} surface="dark" />
               </span>
               <button type="button" className="app-icon-btn" onClick={() => setMobileMenuOpen(false)} aria-label="Close menu">
                 <X size={20} />
