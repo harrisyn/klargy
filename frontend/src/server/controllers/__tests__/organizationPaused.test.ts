@@ -43,7 +43,7 @@ describe('getLocationByCode - paused organization', () => {
     const res = makeRes();
     await getLocationByCode(req, res, vi.fn());
     expect(res.status).not.toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith(location);
+    expect(res.json).toHaveBeenCalledWith({ ...location, joinIdentifier: null });
   });
 });
 

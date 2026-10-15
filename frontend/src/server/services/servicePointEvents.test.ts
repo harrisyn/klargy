@@ -15,7 +15,7 @@ vi.mock('../lib/prisma', () => ({
     externalReference: { findMany: vi.fn() },
   },
 }));
-vi.mock('./notifications.service', () => ({ notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
+vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
 vi.mock('../lib/realtime', () => ({ emitToQueue: vi.fn(), emitToLocation: vi.fn(), SOCKET_EVENTS: {} }));
 
 import prisma from '../lib/prisma';

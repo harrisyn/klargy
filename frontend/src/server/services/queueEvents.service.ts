@@ -3,7 +3,8 @@ import { emitToQueue, emitToLocation, SOCKET_EVENTS } from '../lib/realtime';
 import { generateTicketNumber, getNextSequence } from '../utils/ticket';
 import { getStartOfDay, generateTimeSlots, validTimeZone } from '../utils/date';
 import { dispatchWebhook, WebhookEvent } from './webhooks.service';
-import { notifyEntry, notifyPositions } from './notifications.service';
+import { WAITING_ORDER, notifyEntry, notifyPositions } from './notifications.service';
+import { statusUrlFor } from '../config/appConfig';
 import { buildRefs, RefSubject } from './externalRefs.service';
 
 /**
@@ -66,7 +67,18 @@ interface QueueEventInput {
 /** What an entry's webhook data and Connect responses are built from. */
 export const ENTRY_SNAPSHOT_INCLUDE = {
   user: { select: { id: true, firstName: true, lastName: true, phone: true, identityData: true } },
-  queue: { select: { id: true, service: { select: { id: true, name: true, location: { select: { id: true, name: true, organizationId: true } } } } } },
+  queue: {
+    select: {
+      id: true,
+      service: {
+        select: {
+          id: true,
+          name: true,
+          location: { select: { id: true, name: true, organizationId: true, organization: { select: { slug: true } } } },
+        },
+      },
+    },
+  },
   servicePointInstance: { select: { servicePointService: { select: { servicePoint: { select: { id: true, name: true } } } } } },
 } as const;
 
@@ -82,7 +94,13 @@ type SnapshotEntry = {
   servedAt: Date | null;
   completedAt: Date | null;
   user: { id: string; firstName: string; lastName: string; phone: string | null; identityData: unknown };
-  queue: { service: { id: string; name: string; location: { id: string; name: string; organizationId: string } } };
+  queue: {
+    service: {
+      id: string;
+      name: string;
+      location: { id: string; name: string; organizationId: string; organization?: { slug: string | null } | null };
+    };
+  };
   servicePointInstance: { servicePointService: { servicePoint: { id: string; name: string } } } | null;
 };
 
@@ -103,10 +121,27 @@ export function toEntrySnapshot(entry: SnapshotEntry) {
     servedAt: entry.servedAt,
     completedAt: entry.completedAt,
     patient: entry.user,
+    statusUrl: statusUrlFor(entry.queueId, entry.id, entry.queue.service.location.organization?.slug),
+    /** 1-based place in line while WAITING, else null (see withPositions). */
+    position: null as number | null,
   };
 }
 
 export type EntrySnapshot = ReturnType<typeof toEntrySnapshot>;
+
+/** Fills in `position` for waiting entries: the same order staff call people. */
+export async function withPositions<T extends { entryId: string; queueId: string; status: string; position: number | null }>(
+  snapshots: T[]
+): Promise<T[]> {
+  const queueIds = [...new Set(snapshots.filter((s) => s.status === 'WAITING').map((s) => s.queueId))];
+  if (queueIds.length === 0) return snapshots;
+  const places = new Map<string, number>();
+  for (const queueId of queueIds) {
+    const waiting = await prisma.queueEntry.findMany({ where: { queueId, status: 'WAITING' }, orderBy: WAITING_ORDER, select: { id: true } });
+    waiting.forEach((e, i) => places.set(e.id, i + 1));
+  }
+  return snapshots.map((s) => (s.status === 'WAITING' ? { ...s, position: places.get(s.entryId) ?? null } : s));
+}
 
 /** The Klargy ids in an entry snapshot that `refs` translates. */
 export function entryRefSubject(snapshot: EntrySnapshot, actorUserId?: string | null): RefSubject {
@@ -124,7 +159,8 @@ export function entryRefSubject(snapshot: EntrySnapshot, actorUserId?: string | 
 export async function entrySnapshot(entryId: string) {
   const entry = await prisma.queueEntry.findUnique({ where: { id: entryId }, include: ENTRY_SNAPSHOT_INCLUDE });
   if (!entry) return null;
-  return { organizationId: entry.queue.service.location.organizationId, snapshot: toEntrySnapshot(entry) };
+  const [snapshot] = await withPositions([toEntrySnapshot(entry)]);
+  return { organizationId: entry.queue.service.location.organizationId, snapshot };
 }
 
 async function queueContext(queueId: string) {

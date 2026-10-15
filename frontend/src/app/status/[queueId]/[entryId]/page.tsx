@@ -24,6 +24,8 @@ interface QueueStatus {
   joinedAt: string;
   calledAt: string | null;
   userName: string;
+  /** What we've sent the patient about this ticket, newest first. */
+  messages?: { type: string; message: string; sentAt: string }[];
   organization?: {
     logoUrl?: string | null;
     primaryColor?: string | null;
@@ -65,7 +67,7 @@ export default function QueueStatusPage({
   const [identitySaved, setIdentitySaved] = useState(false);
   const [identityError, setIdentityError] = useState<string | null>(null);
   
-  const { joinQueue, leaveQueue, onQueueUpdated, onEntryStatusChanged } = useSocket();
+  const { joinQueue, leaveQueue, onQueueUpdated, onEntryStatusChanged, onNotification } = useSocket();
 
   // Play alert sound
   const playAlertSound = useCallback(() => {
@@ -279,11 +281,17 @@ export default function QueueStatusPage({
       }
     });
 
+    // A message sent to this ticket shows under Messages straight away.
+    const unsubscribeNotification = onNotification((data) => {
+      if (data.entryId === entryId) loadStatus();
+    });
+
     return () => {
       unsubscribeQueue();
       unsubscribeEntry();
+      unsubscribeNotification();
     };
-  }, [queueId, entryId, onQueueUpdated, onEntryStatusChanged, loadStatus]);
+  }, [queueId, entryId, onQueueUpdated, onEntryStatusChanged, onNotification, loadStatus]);
 
   // Check if already have notification permissions
   useEffect(() => {
@@ -754,6 +762,24 @@ export default function QueueStatusPage({
               </button>
             </div>
           </div>
+        )}
+
+        {/* Messages we've sent them about this ticket */}
+        {status.messages && status.messages.length > 0 && (
+          <section style={messagesCard} aria-labelledby="ticket-messages">
+            <h2 id="ticket-messages" style={messagesTitle}>Messages</h2>
+            <ul style={messagesList}>
+              {status.messages.map((m, i) => (
+                <li key={`${m.sentAt}-${i}`} style={messageItem}>
+                  {/* They're already on the page the link points to. */}
+                  <p style={messageText}>{m.message.replace(/\s*Track your place: \S+$/, '')}</p>
+                  <time style={messageTime} dateTime={m.sentAt}>
+                    {new Date(m.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </time>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {/* Joined At */}
@@ -1282,6 +1308,50 @@ const shareUrlButton: React.CSSProperties = {
   borderRadius: '0.75rem',
   fontWeight: 600,
   cursor: 'pointer',
+};
+
+const messagesCard: React.CSSProperties = {
+  width: '100%',
+  maxWidth: '440px',
+  background: 'white',
+  borderRadius: '1.25rem',
+  padding: '1.25rem 1.5rem',
+  border: '1px solid #e2e6e3',
+  marginTop: '1rem',
+};
+
+const messagesTitle: React.CSSProperties = {
+  fontSize: '0.9375rem',
+  fontWeight: 600,
+  color: '#1f2a33',
+  margin: '0 0 0.5rem',
+};
+
+const messagesList: React.CSSProperties = {
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
+};
+
+const messageItem: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: '0.75rem',
+  padding: '0.625rem 0',
+  borderTop: '1px solid #eef1ef',
+};
+
+const messageText: React.CSSProperties = {
+  margin: 0,
+  fontSize: '0.875rem',
+  lineHeight: 1.45,
+  color: '#33414c',
+};
+
+const messageTime: React.CSSProperties = {
+  flexShrink: 0,
+  fontSize: '0.75rem',
+  color: '#6b7a86',
 };
 
 const joinedAtText: React.CSSProperties = {

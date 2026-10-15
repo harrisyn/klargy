@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../lib/prisma', () => ({
   default: {
-    queueEntry: { findUnique: vi.fn(), count: vi.fn() },
+    queueEntry: { findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn() },
     queue: { findUnique: vi.fn() },
     customerJourney: { findUnique: vi.fn(), updateMany: vi.fn() },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
@@ -17,7 +17,7 @@ vi.mock('../lib/prisma', () => ({
     externalReference: { findMany: vi.fn() },
   },
 }));
-vi.mock('./notifications.service', () => ({ notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
+vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
 vi.mock('../lib/realtime', () => ({ emitToQueue: vi.fn(), emitToLocation: vi.fn(), SOCKET_EVENTS: {} }));
 
 import prisma from '../lib/prisma';
@@ -77,6 +77,22 @@ describe('dispatchWebhook', () => {
 });
 
 describe('recordQueueEvent', () => {
+  it('gives every entry event the patient’s status page and place in line', async () => {
+    (prisma.queueEntry.findUnique as any).mockResolvedValue({
+      ...entry,
+      status: 'WAITING',
+      queue: { service: { ...entry.queue.service, location: { ...entry.queue.service.location, organization: { slug: 'nyaho' } } } },
+    });
+    (prisma.queueEntry.findMany as any).mockResolvedValue([{ id: 'e0' }, { id: 'e9' }, { id: 'e1' }]);
+    await recordQueueEvent({ action: 'entry.joined', queueId: 'q1', entryId: 'e1' });
+    const sent = deliveries();
+    for (const payload of [sent.plain, sent.emr]) {
+      expect(payload.data.statusUrl).toMatch(/^https?:\/\/nyaho\.[^/]+\/status\/q1\/e1$/);
+      expect(payload.data.position).toBe(3);
+    }
+    expect((prisma.queueEntry.findMany as any).mock.calls[0][0].where).toEqual({ queueId: 'q1', status: 'WAITING' });
+  });
+
   it('sends origin, servicePoint and the integration’s refs, with the actor as staff', async () => {
     await recordQueueEvent({ action: 'entry.called', actorUserId: 'staff1', queueId: 'q1', entryId: 'e1' });
     const sent = deliveries();

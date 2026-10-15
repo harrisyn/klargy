@@ -120,7 +120,7 @@ export const useSocket = () => {
     [on]
   );
   const onNotification = useCallback(
-    (callback: (data: { message: string }) => void) => on('notification.sent', callback),
+    (callback: (data: { message: string; entryId?: string; type?: string }) => void) => on('notification.sent', callback),
     [on]
   );
   const onServiceFlowTransition = useCallback((callback: (data: unknown) => void) => on('serviceflow.transition', callback), [on]);

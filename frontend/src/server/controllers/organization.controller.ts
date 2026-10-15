@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
+import { isJoinIdentifierType } from '../services/connectLookup.service';
 import bcrypt from 'bcryptjs';
 import { signToken } from '../lib/jwt';
 import { consumeVerified } from '../lib/verification';
@@ -315,7 +316,7 @@ export const getOrganization = async (req: Request, res: Response, next: NextFun
 export const updateOrganization = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { name, email, phone, slug, identityFieldsConfig, defaultDisplayMode, primaryColor, hidePoweredBy, notificationSettings, industry, customerLabel, customerLabelPlural } = req.body;
+    const { name, email, phone, slug, identityFieldsConfig, defaultDisplayMode, primaryColor, hidePoweredBy, notificationSettings, industry, customerLabel, customerLabelPlural, joinIdentifierType } = req.body;
 
     if (primaryColor !== undefined || hidePoweredBy !== undefined) {
       const features = await getOrganizationFeatures(id);
@@ -365,6 +366,12 @@ export const updateOrganization = async (req: Request, res: Response, next: Next
     const label = (v: unknown) => (v ? String(v).trim().toLowerCase().slice(0, 30) || null : null);
     if (customerLabel !== undefined) updateData.customerLabel = label(customerLabel);
     if (customerLabelPlural !== undefined) updateData.customerLabelPlural = label(customerLabelPlural);
+    if (joinIdentifierType !== undefined) {
+      if (joinIdentifierType !== null && !isJoinIdentifierType(joinIdentifierType)) {
+        return res.status(400).json({ error: 'joinIdentifierType must be mrNumber, memberNumber or null' });
+      }
+      updateData.joinIdentifierType = joinIdentifierType;
+    }
 
     const organization = await prisma.organization.update({
       where: { id },

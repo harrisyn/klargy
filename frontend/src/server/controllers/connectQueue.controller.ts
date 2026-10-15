@@ -10,7 +10,9 @@ import {
   entryRefSubject,
   getOrCreateQueueForDate,
   toEntrySnapshot,
+  withPositions,
 } from '../services/queueEvents.service';
+import { notifyEntry } from '../services/notifications.service';
 import { QueueActionError, callEntry, endEntry, joinQueueEntry, serveEntry } from '../services/queueActions.service';
 
 // Klargy Connect v1, phase 2 (docs/connect/v1.md section 5): patients and
@@ -40,7 +42,7 @@ export async function entryViews(integrationId: string, entryIds: string[]) {
   if (entryIds.length === 0) return [];
   const rows = await prisma.queueEntry.findMany({ where: { id: { in: entryIds } }, include: ENTRY_SNAPSHOT_INCLUDE });
   const byId = new Map(rows.map((r) => [r.id, toEntrySnapshot(r)]));
-  const snapshots = entryIds.map((id) => byId.get(id)).filter((s): s is NonNullable<typeof s> => !!s);
+  const snapshots = await withPositions(entryIds.map((id) => byId.get(id)).filter((s): s is NonNullable<typeof s> => !!s));
   const refs = await buildRefs(integrationId, snapshots.map((s) => entryRefSubject(s, null)));
   return snapshots.map((s, i) => ({ ...s, refs: refs[i] }));
 }
@@ -356,6 +358,8 @@ async function createEntry(req: Request): Promise<Result> {
         },
       }
     );
+    // The patient hears they're in, exactly as when they join themselves.
+    await notifyEntry(entry.id, 'QUEUE_JOINED').catch((e) => console.error('join notification failed:', e));
     return { status: 201, body: { entry: await entryView(integration.id, entry.id) } };
   } catch (error) {
     if (!(error instanceof QueueActionError)) throw error;
@@ -514,6 +518,23 @@ async function moveEntry(req: Request): Promise<Result> {
 export const postEntryByRef = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await idempotent(req, res, () => moveEntry(req));
+  } catch (error) {
+    handle(error, res, next);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// GET /entries/by-ref/:type/:id
+// ---------------------------------------------------------------------------
+
+/** The entry a by-ref action would move, without moving it. */
+export const getEntryByRef = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const integration = caller(req);
+    const { type, id } = req.params;
+    if (!REF_TYPES.includes(type as (typeof REF_TYPES)[number])) throw badRequest(`type must be one of: ${REF_TYPES.join(', ')}`);
+    const entry = await resolveEntry(integration, type as (typeof REF_TYPES)[number], text(id, 'id')!);
+    res.json({ entry: await entryView(integration.id, entry.id) });
   } catch (error) {
     handle(error, res, next);
   }

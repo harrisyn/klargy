@@ -13,10 +13,12 @@ vi.mock('../../lib/prisma', () => ({
 }));
 vi.mock('../../lib/urlSafety', () => ({ assertPublicUrl: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../lib/encryption', () => ({ encrypt: (s: string) => `enc:${s}`, decrypt: (s: string) => s.replace(/^enc:/, '') }));
+vi.mock('../../services/connectLookup.service', () => ({ syncLookupDataSource: vi.fn(async () => {}) }));
 
 import prisma from '../../lib/prisma';
 import { parseCatalog, registerIntegration, putCatalog } from '../connect.controller';
 import { setMapping } from '../emrIntegration.controller';
+import { syncLookupDataSource } from '../../services/connectLookup.service';
 
 function makeRes() {
   const res: any = {};
@@ -76,6 +78,18 @@ describe('registerIntegration', () => {
     await registerIntegration({ integration: { id: 'int1' }, body: { webhookUrl: 'https://a.example.com/h' } } as any, res, vi.fn());
     expect(res.json.mock.calls[0][0].signingSecret).toBe('whsec_old');
     expect(prisma.webhookEndpoint.create).not.toHaveBeenCalled();
+  });
+
+  it('stores lookupUrl and brings the organisation’s lookup data source in line', async () => {
+    (prisma.integration.findUnique as any).mockResolvedValue({
+      id: 'int1', organizationId: 'org1', name: 'Serenity',
+      webhookEndpoint: { id: 'wh1', encryptedSecret: 'enc:whsec_old' },
+    });
+    (prisma.webhookEndpoint.update as any).mockResolvedValue({ id: 'wh1' });
+    const lookupUrl = 'https://api.example.com/v2/integrations/x/patient-lookup';
+    await registerIntegration({ integration: { id: 'int1' }, body: { webhookUrl: 'https://a.example.com/h', lookupUrl } } as any, makeRes(), vi.fn());
+    expect((prisma.integration.update as any).mock.calls[0][0].data.lookupUrl).toBe(lookupUrl);
+    expect(syncLookupDataSource).toHaveBeenCalledWith('org1');
   });
 
   it('requires a webhook URL', async () => {

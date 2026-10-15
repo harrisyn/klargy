@@ -21,7 +21,8 @@ const router = Router();
 // for every request that reaches this router, including unrelated paths.
 
 // Data source routes mounted under /orgs/:organizationId/data-sources
-router.get('/orgs/:organizationId/data-sources', authenticate, authorize('ORG_ADMIN', 'SUPER_ADMIN'), scope(org('params.organizationId')), getDataSources);
+// Desk staff list them too (names only) to offer "Look up in ..." on a ticket.
+router.get('/orgs/:organizationId/data-sources', authenticate, authorize('ORG_ADMIN', 'SUPER_ADMIN', 'LOCATION_ADMIN', 'SERVICE_STAFF', 'RECEPTIONIST'), scope(org('params.organizationId')), getDataSources);
 router.post('/orgs/:organizationId/data-sources', authenticate, authorize('ORG_ADMIN', 'SUPER_ADMIN'), scope(org('params.organizationId')), createDataSource);
 
 // Individual data source routes

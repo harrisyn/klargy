@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
+import { joinIdentifierFor } from '../services/connectLookup.service';
 import { extractSubdomain, extractCustomDomainCandidate } from '../../lib/subdomain';
 
 export const createLocation = async (req: Request, res: Response, next: NextFunction) => {
@@ -148,6 +149,7 @@ export const getLocationByCode = async (req: Request, res: Response, next: NextF
             primaryColor: true,
             hidePoweredBy: true, industry: true, customerLabel: true, customerLabelPlural: true,
             status: true,
+            joinIdentifierType: true,
           }
         },
         services: {
@@ -177,7 +179,14 @@ export const getLocationByCode = async (req: Request, res: Response, next: NextF
       });
     }
 
-    res.json(location);
+    // Asked for on the join form only when an EMR connection can check it.
+    const { joinIdentifierType, ...organization } = location.organization;
+    const required = await joinIdentifierFor({ id: location.organization.id, joinIdentifierType });
+    res.json({
+      ...location,
+      organization,
+      joinIdentifier: required ? { type: required.type, label: required.label } : null,
+    });
   } catch (error) {
     next(error);
   }

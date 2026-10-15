@@ -156,7 +156,7 @@ function WidgetDesk({ launch, onSignedOut }: { launch: DeskLaunch | null; onSign
         <button type="button" onClick={desk.leave} title="Switch desk" aria-label="Switch desk"><Repeat size={16} /></button>
         <button type="button" onClick={signOut} title="Leave desk and sign out" aria-label="Leave desk and sign out"><LogOut size={16} /></button>
       </header>
-      <DeskPanel desk={desk} compact />
+      <DeskPanel desk={desk} compact patientCard={!!launch} />
     </>
   );
 }

@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import type { Service, User } from '@/types';
+import type { PatientLookup, Service, User } from '@/types';
 
 import { API_BASE as API_BASE_URL } from '@/lib/apiBase';
 
@@ -248,6 +248,17 @@ class ApiClient {
 
   async getLaunchDesk(launchId: string, instanceId: string): Promise<{ servicePoint: { id: string; name: string; externalId: string | null } }> {
     const { data } = await this.client.get(`/desk-launches/${encodeURIComponent(launchId)}/desks/${encodeURIComponent(instanceId)}`);
+    return data;
+  }
+
+  // Klargy Connect phase 4: the EMR's record for a patient (it runs the cover check).
+  async connectLookup(params: { identifierType: string; identifier: string; locationId?: string }): Promise<PatientLookup> {
+    const { data } = await this.client.post('/connect-lookup', params);
+    return data;
+  }
+
+  async getEntryLookup(entryId: string): Promise<PatientLookup & { system: string }> {
+    const { data } = await this.client.get(`/connect-lookup/entries/${encodeURIComponent(entryId)}`);
     return data;
   }
 
@@ -584,7 +595,8 @@ class ApiClient {
     return data;
   }
 
-  async fetchFromDataSource(sourceId: string, params: { identifier: string; identifierType?: string }) {
+  /** `userId` (connected-system sources): look them up by the EMR's own id when Klargy has it. */
+  async fetchFromDataSource(sourceId: string, params: { identifier?: string; identifierType?: string; userId?: string; locationId?: string }) {
     const { data } = await this.client.post(`/data-sources/${sourceId}/fetch`, params);
     return data;
   }

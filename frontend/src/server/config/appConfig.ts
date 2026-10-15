@@ -11,3 +11,9 @@ export function buildAppUrl(path: string, subdomain?: string | null): string {
   if (subdomain) base.host = `${subdomain}.${base.host}`;
   return new URL(path, base).toString();
 }
+
+/** The patient's live status page for an entry, on the organisation's
+ * workspace host (the "you've joined" message and Connect's `statusUrl`). */
+export function statusUrlFor(queueId: string, entryId: string, slug?: string | null): string {
+  return buildAppUrl(`/status/${queueId}/${entryId}`, slug);
+}

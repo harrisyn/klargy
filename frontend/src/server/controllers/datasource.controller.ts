@@ -3,6 +3,19 @@ import { prisma } from '../lib/prisma';
 import { DataSourceType } from '@prisma/client';
 import { assertPublicUrl } from '../lib/urlSafety';
 import { sealConfig, openConfig, redactDataSource } from '../lib/dataSourceSecrets';
+import {
+  LOOKUP_IDENTIFIER_TYPES,
+  LookupError,
+  LookupIdentifierType,
+  locationRefFor,
+  lookupIntegrationFor,
+  lookupPatient,
+} from '../services/connectLookup.service';
+
+// INTEGRATION sources belong to an EMR connection (Klargy Connect): it
+// creates, updates and switches them off, never this API.
+const MANAGED_TYPE = 'INTEGRATION';
+const managedRefusal = { error: 'Connected-system lookups are set up by the EMR connection, not here.' };
 
 // Get all data sources for an organization
 export const getDataSources = async (req: Request, res: Response, next: NextFunction) => {
@@ -17,6 +30,10 @@ export const getDataSources = async (req: Request, res: Response, next: NextFunc
       orderBy: { createdAt: 'desc' },
     });
 
+    // Desk staff only need to know what they can look people up in.
+    if (!['ORG_ADMIN', 'SUPER_ADMIN'].includes(req.user?.role ?? '')) {
+      return res.json(dataSources.map(({ id, name, type, isActive }) => ({ id, name, type, isActive })));
+    }
     res.json(dataSources.map(redactDataSource));
   } catch (error) {
     next(error);
@@ -63,6 +80,7 @@ export const createDataSource = async (req: Request, res: Response, next: NextFu
         error: `Invalid type. Must be one of: ${Object.values(DataSourceType).join(', ')}` 
       });
     }
+    if (type === MANAGED_TYPE) return res.status(400).json(managedRefusal);
 
     const dataSource = await prisma.dataSource.create({
       data: {
@@ -99,6 +117,9 @@ export const updateDataSource = async (req: Request, res: Response, next: NextFu
       return res.status(400).json({ 
         error: `Invalid type. Must be one of: ${Object.values(DataSourceType).join(', ')}` 
       });
+    }
+    if ((type && type !== existing.type && (type === MANAGED_TYPE || existing.type === MANAGED_TYPE)) || (existing.type === MANAGED_TYPE && config)) {
+      return res.status(400).json(managedRefusal);
     }
 
     const dataSource = await prisma.dataSource.update({
@@ -162,6 +183,13 @@ export const testDataSource = async (req: Request, res: Response, next: NextFunc
       case 'WEBHOOK':
         testResult = { success: true, message: 'Webhook endpoint is ready to receive data' };
         break;
+      case 'INTEGRATION': {
+        const integration = await lookupIntegrationFor(dataSource.organizationId, integrationIdOf(config));
+        testResult = integration
+          ? { success: true, message: `Lookups go to ${integration.name}.` }
+          : { success: false, message: 'The EMR connection is switched off or has no lookup address.' };
+        break;
+      }
       default:
         testResult = { success: false, message: 'Unknown data source type' };
     }
@@ -328,11 +356,7 @@ export const deleteFieldMapping = async (req: Request, res: Response, next: Next
 export const fetchFromDataSource = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { identifier, identifierType = 'phone' } = req.body;
-
-    if (!identifier) {
-      return res.status(400).json({ error: 'Identifier is required' });
-    }
+    const { identifier, identifierType = 'phone', userId, locationId } = req.body;
 
     const dataSource = await prisma.dataSource.findUnique({
       where: { id },
@@ -341,6 +365,11 @@ export const fetchFromDataSource = async (req: Request, res: Response, next: Nex
 
     if (!dataSource) {
       return res.status(404).json({ error: 'Data source not found' });
+    }
+
+    // A connected system can look someone up by the id it gave them instead.
+    if (!identifier && !(dataSource.type === 'INTEGRATION' && typeof userId === 'string' && userId)) {
+      return res.status(400).json({ error: 'Identifier is required' });
     }
 
     if (!dataSource.isActive) {
@@ -356,6 +385,42 @@ export const fetchFromDataSource = async (req: Request, res: Response, next: Nex
         return res.status(400).json({ error: result.message });
       }
       responseData = result.data as Record<string, unknown>;
+    } else if (dataSource.type === 'INTEGRATION') {
+      const integration = await lookupIntegrationFor(dataSource.organizationId, integrationIdOf(config));
+      if (!integration) {
+        return res.status(409).json({ error: 'The EMR connection is switched off or has no lookup address.', code: 'LOOKUP_NOT_CONFIGURED' });
+      }
+      if (!LOOKUP_IDENTIFIER_TYPES.includes(identifierType)) {
+        return res.status(400).json({ error: `identifierType must be one of: ${LOOKUP_IDENTIFIER_TYPES.join(', ')}` });
+      }
+      // The EMR's own id beats a phone number, which several people can share.
+      const patientRef =
+        typeof userId === 'string' && userId
+          ? (await prisma.externalReference.findFirst({
+              where: { integrationId: integration.id, resourceType: 'patient', resourceId: userId },
+              select: { externalId: true },
+            }))?.externalId
+          : undefined;
+      if (!patientRef && !identifier) return res.status(400).json({ error: 'Identifier is required' });
+      try {
+        const result = await lookupPatient(integration, {
+          identifierType: patientRef ? 'patientRef' : (identifierType as LookupIdentifierType),
+          identifier: patientRef ?? String(identifier),
+          context: 'staff',
+          locationRef: await locationRefFor(integration.id, typeof locationId === 'string' ? locationId : null),
+        });
+        if (!result.matched) {
+          return res.status(404).json({
+            error: result.candidates.length
+              ? `Several people in ${integration.name} have this phone number. Look them up by MR number instead.`
+              : `Nobody matching was found in ${integration.name}.`,
+          });
+        }
+        responseData = result as unknown as Record<string, unknown>;
+      } catch (error) {
+        if (error instanceof LookupError) return res.status(error.status).json({ error: error.message, code: error.code });
+        throw error;
+      }
     } else {
       return res.status(400).json({ error: `Fetching from ${dataSource.type} sources not yet implemented` });
     }
@@ -377,6 +442,9 @@ export const fetchFromDataSource = async (req: Request, res: Response, next: Nex
     next(error);
   }
 };
+
+const integrationIdOf = (config: Record<string, unknown>) =>
+  typeof config.integrationId === 'string' ? config.integrationId : undefined;
 
 // Helper to fetch from API data source
 async function fetchFromApi(

@@ -5,6 +5,7 @@ import { encrypt, decrypt } from '../lib/encryption';
 import { assertPublicUrl } from '../lib/urlSafety';
 import { WEBHOOK_EVENTS } from '../services/webhooks.service';
 import { ADMIN_MAPPABLE_TYPES, CONNECT_REF_TYPES } from '../services/externalRefs.service';
+import { syncLookupDataSource } from '../services/connectLookup.service';
 
 // Klargy Connect v1 (docs/connect/v1.md): the API another system (an EMR)
 // calls with its integration API key. Every handler here runs after
@@ -201,6 +202,7 @@ export const registerIntegration = async (req: Request, res: Response, next: Nex
         systemVersion: systemVersion ?? null,
       },
     });
+    await syncLookupDataSource(integration.organizationId).catch((e) => console.error('lookup data source sync failed:', e));
 
     res.json({ integrationId: integration.id, signingSecret: secret, webhookEvents: WEBHOOK_EVENTS });
   } catch (error) {
