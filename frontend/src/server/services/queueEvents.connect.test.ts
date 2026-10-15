@@ -17,7 +17,7 @@ vi.mock('../lib/prisma', () => ({
     externalReference: { findMany: vi.fn() },
   },
 }));
-vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
+vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false }, notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
 vi.mock('../lib/realtime', () => ({ emitToQueue: vi.fn(), emitToLocation: vi.fn(), SOCKET_EVENTS: {} }));
 
 import prisma from '../lib/prisma';
@@ -90,7 +90,7 @@ describe('recordQueueEvent', () => {
       expect(payload.data.statusUrl).toMatch(/^https?:\/\/nyaho\.[^/]+\/status\/q1\/e1$/);
       expect(payload.data.position).toBe(3);
     }
-    expect((prisma.queueEntry.findMany as any).mock.calls[0][0].where).toEqual({ queueId: 'q1', status: 'WAITING' });
+    expect((prisma.queueEntry.findMany as any).mock.calls[0][0].where).toEqual({ queueId: 'q1', status: 'WAITING', heldAt: null, awaitingClearance: false });
   });
 
   it('sends origin, servicePoint and the integration’s refs, with the actor as staff', async () => {
@@ -162,3 +162,33 @@ describe('closeJourneyIfDone', () => {
     expect(prisma.webhookDelivery.create).not.toHaveBeenCalled();
   });
 });
+
+describe('phase 6 entry fields', () => {
+  it('sends held, awaitingClearance, sentBy, the journey (with the EMR’s service ids) and a transfer’s source entry with its refs', async () => {
+    (prisma.queueEntry.findUnique as any).mockImplementation(async ({ where }: any) =>
+      where.id === 'e0'
+        ? { ...entry, id: 'e0', status: 'SERVED', ticketNumber: 'R001' }
+        : { ...entry, status: 'WAITING', awaitingClearance: true, sentBy: 'patient', heldAt: null, previousEntryId: 'e0' }
+    );
+    (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
+      where.OR
+        ? [
+            { id: 'e0', ticketNumber: 'R001', status: 'SERVED', joinedAt: new Date(1), completedAt: new Date(2), journeyId: 'j1', queue: { service: { id: 's1', name: 'GP' } } },
+            { id: 'e1', ticketNumber: 'G012', status: 'WAITING', joinedAt: new Date(3), completedAt: null, journeyId: 'j1', queue: { service: { id: 's2', name: 'Cashier' } } },
+          ]
+        : []
+    );
+    await recordQueueEvent({ action: 'entry.transferred', entryId: 'e1', origin: ORIGIN.public, data: { fromEntryId: 'e0', fromServiceId: 's1', toServiceId: 's2' } });
+    const sent = deliveries();
+    expect(sent.emr.data).toMatchObject({ held: false, awaitingClearance: true, sentBy: 'patient', origin: { type: 'public', integrationId: null } });
+    expect(sent.emr.data.journey.map((j: any) => j.service)).toEqual([
+      { id: 's1', ref: 'clinic-1', name: 'GP' },
+      { id: 's2', ref: null, name: 'Cashier' },
+    ]);
+    expect(sent.emr.data.from).toMatchObject({ entryId: 'e0', status: 'SERVED', refs: { visit: 'V1', patient: 'P1', encounter: null } });
+    // Other endpoints get the same shape without any EMR ids.
+    expect(sent.plain.data.from.refs).toBeUndefined();
+    expect(sent.plain.data.journey[0].service.ref).toBeNull();
+  });
+});
+

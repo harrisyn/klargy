@@ -29,6 +29,7 @@ import type {
   RegisterIntegrationInput,
   RegisterIntegrationResult,
   ServiceStatusInput,
+  ServingLinkInput,
   ServiceStatusResult,
   TransferInput,
   TransferResult,
@@ -175,7 +176,7 @@ export class KlargyConnect {
     return { entry: res.body.entry, created: res.status === 201, replayed: isReplayed(res.headers) };
   }
 
-  /** `POST /entries/by-ref/{type}/{id}/{action}` for call, complete, cancel and no-show. */
+  /** `POST /entries/by-ref/{type}/{id}/{action}` for call, complete, cancel, no-show, hold, resume and clear. */
   async entryAction(
     type: EntryRefType,
     id: string,
@@ -205,6 +206,30 @@ export class KlargyConnect {
   /** Marks the entry as not here (NO_SHOW). */
   noShowEntry(type: EntryRefType, id: string, input?: EntryActionInput, options?: IdempotentCallOptions) {
     return this.entryAction(type, id, 'no-show', input, options);
+  }
+
+  /** Puts the entry being served on hold: it leaves the room and keeps its place (`entry.held`). */
+  holdEntry(type: EntryRefType, id: string, input?: EntryActionInput, options?: IdempotentCallOptions) {
+    return this.entryAction(type, id, 'hold', input, options);
+  }
+
+  /** Calls a held entry back to `servicePoint`, `staff`'s room or the room it was held in (`entry.resumed`). */
+  resumeEntry(type: EntryRefType, id: string, input?: EntryActionInput, options?: IdempotentCallOptions) {
+    return this.entryAction(type, id, 'resume', input, options);
+  }
+
+  /** Payment settled: lets an entry awaiting clearance into the line (`entry.cleared`). */
+  clearEntry(type: EntryRefType, id: string, input?: EntryActionInput, options?: IdempotentCallOptions) {
+    return this.entryAction(type, id, 'clear', input, options);
+  }
+
+  /**
+   * `POST /entries/serving/link`: links the entry being served in `staff`'s
+   * room to the EMR's patient, visit (and encounter). 404 NO_SERVING_ENTRY when there is none.
+   */
+  async linkServingEntry(input: ServingLinkInput, options: IdempotentCallOptions = {}): Promise<EntryResult> {
+    const res = await this.request<{ entry: Entry }>('POST', '/entries/serving/link', this.idempotent(input, options));
+    return { entry: res.body.entry, replayed: isReplayed(res.headers) };
   }
 
   /** `POST …/transfer`: completes the entry and issues a ticket for `to` in the same visit. */

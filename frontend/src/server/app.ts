@@ -6,6 +6,8 @@ import { handleStripeWebhook, handlePaystackWebhook } from './controllers/paymen
 import { corsOrigin } from './lib/cors';
 import { getJwtSecret } from './lib/jwt';
 import { realtimeRequestScope } from './lib/realtime';
+import { APP_URL_CONFIGURED, assertAppUrlConfigured, rememberRequestAppUrl } from './config/appConfig';
+import { extractSubdomain } from '../lib/subdomain';
 
 /**
  * The API as an Express app. It no longer listens on its own port: Next.js
@@ -16,6 +18,8 @@ function createApp(): Application {
   // Fail fast on a missing/default JWT secret in production rather than on
   // the first login.
   getJwtSecret();
+  // Same for APP_URL: every desk, status and email link is built on it.
+  assertAppUrlConfigured();
 
   const app = express();
   // Behind a proxy/load balancer (Vercel, nginx), so req.ip is the real client
@@ -26,6 +30,15 @@ function createApp(): Application {
   // Real-time events raised while handling a request are flushed before the
   // response ends (serverless functions may freeze right after).
   app.use(realtimeRequestScope);
+
+  // Development without APP_URL: build links on the address the app is
+  // reached on (see appConfig.appUrl).
+  if (!APP_URL_CONFIGURED && process.env.NODE_ENV !== 'production') {
+    app.use((req, _res, next) => {
+      rememberRequestAppUrl(req.headers, req.protocol, extractSubdomain);
+      next();
+    });
+  }
 
   // Webhook routes need the raw body for signature verification, so they're
   // registered before express.json() runs (which would otherwise consume and

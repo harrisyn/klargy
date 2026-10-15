@@ -22,9 +22,10 @@ vi.mock('../../lib/prisma', () => ({
     service: { findFirst: vi.fn() },
     customerJourney: { findUnique: vi.fn() },
     queueEntry: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
-    user: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    user: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     servicePoint: { findFirst: vi.fn() },
     servicePointService: { findFirst: vi.fn() },
+    servicePointInstance: { findMany: vi.fn().mockResolvedValue([]) },
     appointment: { findFirst: vi.fn(), updateMany: vi.fn() },
   },
 }));
@@ -43,11 +44,15 @@ vi.mock('../../services/queueActions.service', async () => {
     endEntry: vi.fn(),
     checkEntryLimits: vi.fn(),
     setEntryPriority: vi.fn(),
+    holdEntry: vi.fn(),
+    resumeEntry: vi.fn(),
+    clearEntry: vi.fn(),
   };
 });
 
 vi.mock('../../services/notifications.service', () => ({
   WAITING_ORDER: [],
+  CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false },
   notifyEntry: vi.fn().mockResolvedValue(undefined),
   notifyPositions: vi.fn(),
 }));
@@ -63,6 +68,9 @@ import prisma from '../../lib/prisma';
 import { getOrCreateQueueForDate, transferEntryToService, recordQueueEvent, TransferError } from '../../services/queueEvents.service';
 import {
   QueueActionError,
+  holdEntry,
+  resumeEntry,
+  clearEntry,
   joinQueueEntry,
   callEntry,
   serveEntry,
@@ -71,7 +79,7 @@ import {
   setEntryPriority,
 } from '../../services/queueActions.service';
 import { notifyEntry } from '../../services/notifications.service';
-import { postEntry, postEntryByRef, getEntryByRef, listEntries, putPatient } from '../connectQueue.controller';
+import { postEntry, postEntryByRef, getEntryByRef, listEntries, putPatient, postServingLink } from '../connectQueue.controller';
 
 const integration = { id: 'int1', organizationId: 'org1', scopes: [] };
 const ORIGIN = { type: 'integration', integrationId: 'int1' };
@@ -158,7 +166,7 @@ beforeEach(() => {
   (prisma.customerJourney.findUnique as any).mockResolvedValue(null);
   (prisma.queueEntry.findFirst as any).mockResolvedValue(null);
   (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
-    where.queueId && where.status === 'WAITING' ? [{ id: 'e0' }, { id: 'e1' }] : (where.id?.in ?? []).map((id: string) => entryRow(id))
+    where.OR ? [] : where.queueId && where.status === 'WAITING' ? [{ id: 'e0' }, { id: 'e1' }] : (where.id?.in ?? []).map((id: string) => entryRow(id))
   );
   (getOrCreateQueueForDate as any).mockResolvedValue({ queue: { id: 'q1', status: 'ACTIVE' } });
   (joinQueueEntry as any).mockImplementation(async (_q: string, _input: unknown, _ctx: unknown, hooks: any) => {
@@ -199,7 +207,7 @@ describe('POST /entries', () => {
 
   it('gives no place in line once the entry is being served', async () => {
     (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
-      where.status ? [] : where.id.in.map((id: string) => entryRow(id, 'SERVING'))
+      where.OR ? [] : where.status ? [] : where.id.in.map((id: string) => entryRow(id, 'SERVING'))
     );
     const res = makeRes();
     await postEntry(makeReq({ body }), res, vi.fn());
@@ -355,7 +363,7 @@ describe('POST /entries/by-ref', () => {
     refs.push({ resourceType: 'visit', resourceId: 'j1', externalId: 'V1' });
     (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1', 'e2'] });
     (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
-      where.status ? [{ id: 'e1' }, { id: 'e2' }] : where.id.in.map((id: string) => entryRow(id))
+      where.OR ? [] : where.status ? [{ id: 'e1' }, { id: 'e2' }] : where.id.in.map((id: string) => entryRow(id))
     );
     (prisma.queueEntry.findFirst as any).mockImplementation(async ({ where }: any) => ({
       id: where.id, status: where.id === 'e2' ? 'SERVING' : 'WAITING', queueId: 'q1', queue: { serviceId: 's1' },
@@ -419,7 +427,7 @@ describe('GET /entries/by-ref', () => {
     refs.push({ resourceType: 'visit', resourceId: 'j1', externalId: 'V1' });
     (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1', 'e2'] });
     (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
-      where.status?.in ? [{ id: 'e1' }, { id: 'e2' }] : where.queueId ? [] : where.id.in.map((id: string) => entryRow(id, id === 'e2' ? 'SERVING' : 'WAITING'))
+      where.OR ? [] : where.status?.in ? [{ id: 'e1' }, { id: 'e2' }] : where.queueId ? [] : where.id.in.map((id: string) => entryRow(id, id === 'e2' ? 'SERVING' : 'WAITING'))
     );
     (prisma.queueEntry.findFirst as any).mockImplementation(async ({ where }: any) => ({
       id: where.id, status: where.id === 'e2' ? 'SERVING' : 'WAITING', queueId: 'q1', queue: { serviceId: 's1' },
@@ -456,7 +464,7 @@ describe('GET /entries', () => {
   it('lists entries changed since, oldest first, scoped to the organisation', async () => {
     const t = (m: number) => new Date(Date.UTC(2026, 9, 14, 9, m));
     (prisma.queueEntry.findMany as any).mockImplementation(async (args: any) =>
-      args.select ? [{ id: 'e1', updatedAt: t(1) }, { id: 'e2', updatedAt: t(2) }] : args.where.id.in.map((id: string) => entryRow(id))
+      args.where.OR ? [] : args.select ? [{ id: 'e1', updatedAt: t(1) }, { id: 'e2', updatedAt: t(2) }] : args.where.id.in.map((id: string) => entryRow(id))
     );
     const res = makeRes();
     await listEntries(makeReq({ method: 'GET', query: { updatedSince: t(0).toISOString() } }), res, vi.fn());
@@ -517,7 +525,7 @@ describe('phase 5: by-ref service selector, transfer and priority', () => {
     const svc: Record<string, string> = { e1: 's1', e2: 's2', e3: 's2' };
     const st: Record<string, string> = { e1: 'WAITING', e2: 'SERVING', e3: 'WAITING' };
     (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) => {
-      if (where.queueId) return [];
+      if (where.queueId || where.OR) return [];
       if (where.status?.in) {
         return where.id.in.filter((id: string) => !where.queue || svc[id] === where.queue.serviceId).map((id: string) => ({ id }));
       }
@@ -663,5 +671,150 @@ describe('POST /entries with refs.appointment', () => {
     await postEntry(makeReq({ body: { ...body, refs: { ...body.refs, appointment: 'APT9' } } }), res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(201);
     expect(prisma.appointment.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('phase 6: hold, resume, clearance, calling into a room, linking a walk-in', () => {
+  const byRef = (type: string, id: string, action: string, b: Record<string, unknown> = {}) =>
+    makeReq({ params: { type, id, action }, body: b, path: `/entries/by-ref/${type}/${id}/${action}` });
+  const entryIs = (status: string, extra: Record<string, unknown> = {}) =>
+    (prisma.queueEntry.findFirst as any).mockResolvedValue({
+      id: 'e1', status, queueId: 'q1', heldAt: null, awaitingClearance: false, queue: { serviceId: 's1' }, ...extra,
+    });
+  const staffAt = (serviceId: string) => {
+    refs.push({ resourceType: 'staff', resourceId: 'staff1', externalId: 'DR1' });
+    (prisma.user.findFirst as any).mockResolvedValue({ id: 'staff1' });
+    (prisma.servicePointInstance.findMany as any).mockResolvedValue([{ id: 'desk7', servicePointService: { serviceId } }]);
+  };
+
+  it('puts the entry being served on hold, and answers 200 without change when it already is', async () => {
+    entryIs('SERVING');
+    const res = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'hold'), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(holdEntry).toHaveBeenCalledWith('e1', expect.objectContaining({ origin: ORIGIN }));
+
+    vi.clearAllMocks();
+    entryIs('WAITING', { heldAt: new Date() });
+    const res2 = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'hold'), res2, vi.fn());
+    expect(res2.status).toHaveBeenCalledWith(200);
+    expect(holdEntry).not.toHaveBeenCalled();
+  });
+
+  it('refuses to hold someone who is only waiting', async () => {
+    entryIs('WAITING');
+    const res = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'hold'), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].code).toBe('INVALID_TRANSITION');
+  });
+
+  it('resumes a held entry into the room the staff member is signed in to', async () => {
+    entryIs('WAITING', { heldAt: new Date() });
+    staffAt('s1');
+    const res = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'resume', { staff: 'DR1' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(resumeEntry).toHaveBeenCalledWith('e1', { servicePointInstanceId: 'desk7' }, expect.objectContaining({ actorUserId: 'staff1' }));
+  });
+
+  it('calls into the staff member’s room, and answers 409 ENTRY_IN_OTHER_SERVICE when the ticket is elsewhere', async () => {
+    entryIs('WAITING');
+    staffAt('s1');
+    const res = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'call', { staff: 'DR1' }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(callEntry).toHaveBeenCalledWith('q1', { entryId: 'e1', servicePointInstanceId: 'desk7' }, expect.anything());
+
+    vi.clearAllMocks();
+    entryIs('WAITING');
+    staffAt('s-other');
+    const res2 = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'call', { staff: 'DR1' }), res2, vi.fn());
+    expect(res2.status).toHaveBeenCalledWith(409);
+    expect(res2.json.mock.calls[0][0]).toMatchObject({ code: 'ENTRY_IN_OTHER_SERVICE', service: 's1' });
+    expect(callEntry).not.toHaveBeenCalled();
+  });
+
+  it('answers 409 AWAITING_CLEARANCE when calling someone who hasn’t paid', async () => {
+    entryIs('WAITING', { awaitingClearance: true });
+    (callEntry as any).mockRejectedValue(new (QueueActionError as any)(409, 'AWAITING_CLEARANCE', { error: 'unpaid' }));
+    const res = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'call'), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].code).toBe('AWAITING_CLEARANCE');
+  });
+
+  it('clears an entry awaiting payment, and does nothing for one that isn’t', async () => {
+    entryIs('WAITING', { awaitingClearance: true });
+    const res = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'clear'), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(clearEntry).toHaveBeenCalledWith('e1', expect.objectContaining({ origin: ORIGIN }));
+
+    vi.clearAllMocks();
+    entryIs('SERVED');
+    const res2 = makeRes();
+    await postEntryByRef(byRef('entry', 'e1', 'clear'), res2, vi.fn());
+    expect(res2.status).toHaveBeenCalledWith(200);
+    expect(clearEntry).not.toHaveBeenCalled();
+  });
+
+  it('passes cleared: true to a new ticket, and refuses a non-boolean', async () => {
+    const res = makeRes();
+    await postEntry(makeReq({ body: { ...body, cleared: true } }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect((joinQueueEntry as any).mock.calls[0][1]).toMatchObject({ cleared: true });
+    const res2 = makeRes();
+    await postEntry(makeReq({ body: { ...body, cleared: 'yes' } }), res2, vi.fn());
+    expect(res2.status).toHaveBeenCalledWith(400);
+  });
+
+  it('gives entry objects held, awaitingClearance, sentBy and the journey with the EMR’s service ids', async () => {
+    (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
+      where.OR
+        ? [
+            { id: 'e0', ticketNumber: 'R001', status: 'SERVED', joinedAt: new Date(1), completedAt: new Date(2), journeyId: 'j1', queue: { service: { id: 's1', name: 'GP' } } },
+            { id: 'e1', ticketNumber: 'G001', status: 'WAITING', joinedAt: new Date(3), completedAt: null, journeyId: 'j1', queue: { service: { id: 's9', name: 'Cashier' } } },
+          ]
+        : where.queueId
+          ? []
+          : (where.id?.in ?? []).map((id: string) => entryRow(id, 'WAITING', { awaitingClearance: true, sentBy: 'patient' }))
+    );
+    const res = makeRes();
+    await postEntry(makeReq({ body }), res, vi.fn());
+    const { entry } = res.json.mock.calls[0][0];
+    expect(entry).toMatchObject({ held: false, awaitingClearance: true, sentBy: 'patient' });
+    expect(entry.journey).toEqual([
+      { entryId: 'e0', ticketNumber: 'R001', service: { id: 's1', ref: 'clinic-1', name: 'GP' }, status: 'SERVED', joinedAt: new Date(1), endedAt: new Date(2) },
+      { entryId: 'e1', ticketNumber: 'G001', service: { id: 's9', ref: null, name: 'Cashier' }, status: 'WAITING', joinedAt: new Date(3), endedAt: null },
+    ]);
+  });
+
+  it('links the walk-in being served at the staff member’s desk to the EMR patient and visit', async () => {
+    staffAt('s1');
+    (prisma.queueEntry.findFirst as any).mockResolvedValue({ id: 'e5', userId: 'walkin', journeyId: 'j5' });
+    (prisma.user.findUnique as any).mockResolvedValue({ identityData: null });
+    const res = makeRes();
+    await postServingLink(
+      makeReq({ path: '/entries/serving/link', body: { staff: 'DR1', refs: { patient: 'P7', visit: 'V7' }, patient: { firstName: 'Kofi', lastName: 'Boateng' } } }),
+      res,
+      vi.fn()
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect((prisma.queueEntry.findFirst as any).mock.calls[0][0].where).toMatchObject({ status: 'SERVING', servicePointInstanceId: { in: ['desk7'] } });
+    expect(refs).toContainEqual(expect.objectContaining({ resourceType: 'patient', resourceId: 'walkin', externalId: 'P7' }));
+    expect(refs).toContainEqual(expect.objectContaining({ resourceType: 'visit', resourceId: 'j5', externalId: 'V7' }));
+    expect((prisma.user.update as any).mock.calls[0][0]).toMatchObject({ where: { id: 'walkin' }, data: { firstName: 'Kofi' } });
+  });
+
+  it('answers 404 NO_SERVING_ENTRY when nobody is being served there', async () => {
+    staffAt('s1');
+    (prisma.queueEntry.findFirst as any).mockResolvedValue(null);
+    const res = makeRes();
+    await postServingLink(makeReq({ path: '/entries/serving/link', body: { staff: 'DR1', refs: { patient: 'P7', visit: 'V7' } } }), res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json.mock.calls[0][0].code).toBe('NO_SERVING_ENTRY');
   });
 });

@@ -59,6 +59,9 @@ export const limits = {
   registerOrg: rateLimit({ name: 'register-org', windowSeconds: 60 * 60, max: 10 }),
   // Generous: one kiosk behind one clinic IP can issue a lot of tickets.
   publicJoin: rateLimit({ name: 'public-join', windowSeconds: 10 * 60, max: 300 }),
+  // A patient moving themselves on from their status page: a handful per
+  // ticket is plenty.
+  selfMove: rateLimit({ name: 'self-move', windowSeconds: 10 * 60, max: 10, key: (req) => req.params?.entryId }),
   // Per API key (its first characters) rather than per IP: an EMR's servers
   // may sit behind one address with many clinics.
   // Desk launch codes are single use and expire in a minute; this only

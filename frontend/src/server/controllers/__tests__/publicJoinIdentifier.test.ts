@@ -24,10 +24,10 @@ vi.mock('../../services/queueEvents.service', () => ({
   recordQueueEvent: vi.fn(), startJourney: vi.fn(), closeJourneyIfDone: vi.fn(), afterQueueChange: vi.fn(),
   afterEntryCalled: vi.fn(), transferEntryToService: vi.fn(), TransferError: class extends Error {},
   getOrCreateQueueForDate: vi.fn(async () => ({ queue: { id: 'q1', status: 'ACTIVE' } })),
-  serviceTimeZone: vi.fn(), ORIGIN: { public: { type: 'public' } },
+  serviceTimeZone: vi.fn(), ORIGIN: { public: { type: 'public' } }, journeySteps: vi.fn(async () => new Map()),
 }));
 vi.mock('../../services/notifications.service', () => ({
-  WAITING_ORDER: [], computePosition: vi.fn(async () => 1), notifyEntry: vi.fn(async () => {}),
+  WAITING_ORDER: [], CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false }, computePosition: vi.fn(async () => 1), notifyEntry: vi.fn(async () => {}),
 }));
 vi.mock('../../services/connectLookup.service', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../services/connectLookup.service')>()),

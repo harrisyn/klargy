@@ -11,7 +11,7 @@ vi.mock('../lib/prisma', () => ({
     externalReference: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
-vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], notifyEntry: vi.fn().mockResolvedValue(undefined), notifyPositions: vi.fn() }));
+vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false }, notifyEntry: vi.fn().mockResolvedValue(undefined), notifyPositions: vi.fn() }));
 vi.mock('./webhooks.service', () => ({ dispatchWebhook: vi.fn() }));
 vi.mock('../lib/realtime', () => ({ emitToQueue: vi.fn(), emitToLocation: vi.fn(), SOCKET_EVENTS: { QUEUE_UPDATED: 'queue:updated' } }));
 

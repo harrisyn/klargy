@@ -15,6 +15,7 @@ export interface WizardData {
   requiresName: boolean;
   requiresPhone: boolean;
   allowAnonymous: boolean;
+  requiresClearance: boolean;
   displayMode: '' | 'TICKET_ONLY' | 'NAME_AND_TICKET' | 'FULL_INFO';
 
   // Step 2: Locations
@@ -40,6 +41,7 @@ export const initialWizardData: WizardData = {
   requiresName: true,
   requiresPhone: false,
   allowAnonymous: false,
+  requiresClearance: false,
   displayMode: '',
   locationScope: 'specific',
   selectedLocationId: '',

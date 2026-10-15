@@ -85,6 +85,8 @@ await klargy.transferEntry('visit', 'VIS-456', { to: 'LOC-1:lab', reason: 'Lab o
 | `putPatient(patientId, patient)` | `PUT /patients/{patientId}` | yes |
 | `createEntry(input, { idempotencyKey? })` | `POST /entries` | with a key |
 | `callEntry` / `completeEntry` / `cancelEntry` / `noShowEntry(type, id, input?, opts?)` | `POST /entries/by-ref/{type}/{id}/{action}` | with a key |
+| `holdEntry` / `resumeEntry` / `clearEntry(type, id, input?, opts?)` | `POST …/hold`, `…/resume`, `…/clear` | with a key |
+| `linkServingEntry({ staff, refs, patient? }, opts?)` | `POST /entries/serving/link` | with a key |
 | `transferEntry(type, id, { to, … }, opts?)` | `POST …/transfer` | with a key |
 | `setEntryPriority(type, id, { priority, … }, opts?)` | `POST …/priority` | with a key |
 | `getEntryByRef(type, id, { service? })` | `GET /entries/by-ref/{type}/{id}` | yes |
@@ -193,6 +195,18 @@ desk.destroy();
 ```
 
 Messages are accepted only from the frame's own window and the launch URL's origin. `logout` is posted only to that origin. `parseDeskMessage`, `DESK_MESSAGES` and `CONTRACT` are exported for custom handling.
+
+For a floating toolbar, load the compact one-row layout and size the frame to what it asks for (it grows while a menu is open):
+
+```ts
+const bar = embedDesk({
+  container: document.getElementById('klargy-bar')!,
+  url,
+  layout: 'bar', // adds layout=bar to the URL; deskUrl(url, 'bar') does the same
+  onResize: (height) => { bar.iframe.style!.height = `${Math.min(Math.max(height, 56), 480)}px`; },
+  onWaiting: (count) => setBubbleBadge(count),
+});
+```
 
 ## Development
 

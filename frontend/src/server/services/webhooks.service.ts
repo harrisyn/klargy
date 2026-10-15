@@ -11,6 +11,9 @@ export const WEBHOOK_EVENTS = [
   'entry.no_show',
   'entry.transferred',
   'entry.priority_changed',
+  'entry.held',
+  'entry.resumed',
+  'entry.cleared',
   'queue.paused',
   'queue.resumed',
   'appointment.created',
@@ -47,7 +50,9 @@ export async function dispatchWebhook(
   organizationId: string,
   event: WebhookEvent,
   data: unknown,
-  refsFor?: RefsResolver
+  refsFor?: RefsResolver,
+  /** More fields for an integration's own endpoint (its ids inside the data). */
+  extraFor?: (integrationId: string) => Promise<Record<string, unknown>>
 ): Promise<void> {
   const endpoints = await prisma.webhookEndpoint.findMany({
     where: { organizationId, isActive: true },
@@ -62,6 +67,9 @@ export async function dispatchWebhook(
       let body = data;
       if (refsFor && endpoint.integration && data && typeof data === 'object') {
         body = { ...(data as object), refs: await refsFor(endpoint.integration.id) };
+      }
+      if (extraFor && endpoint.integration && body && typeof body === 'object') {
+        body = { ...(body as object), ...(await extraFor(endpoint.integration.id)) };
       }
       const payload = { event, createdAt, data: body };
       return prisma.webhookDelivery.create({ data: { endpointId: endpoint.id, event, payload: payload as any } });

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { DoorOpen, Loader2 } from 'lucide-react';
 import api from '@/api/client';
@@ -10,17 +10,21 @@ import { deskLabel } from './useDesk';
 
 interface LocationRow { id: string; name: string }
 
-/** "Where are you working today?" Desks grouped by service. A host app
- * (Klargy Connect) can name the room to suggest: its location is opened, its
- * desks come first and the first free one has focus. */
-export default function DeskPicker({ desk, compact = false, preferServicePointId = null }: { desk: Desk; compact?: boolean; preferServicePointId?: string | null }) {
-  const { user, isAdmin } = useAuthContext();
+export interface DeskRoomGroup { name: string; items: DeskInstance[] }
+
+/** The desks and rooms the practitioner can sign in to, grouped by
+ * service, and signing in to one (asking before taking over someone's).
+ * Shared by the picker and the bar layout of the desk widget. A host app
+ * (Klargy Connect) can name the room to suggest: its location is opened and
+ * its desks come first. */
+export function useDeskRooms(desk: Desk, preferServicePointId: string | null = null) {
+  const { user } = useAuthContext();
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [locationId, setLocationId] = useState('');
   const [instances, setInstances] = useState<DeskInstance[] | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [problem, setProblem] = useState('');
-  const suggested = useRef<HTMLButtonElement | null>(null);
+  const currentLocationId = desk.desk?.locationId ?? null;
 
   useEffect(() => {
     const organizationId = user?.organizationId;
@@ -31,12 +35,14 @@ export default function DeskPicker({ desk, compact = false, preferServicePointId
         const locs: LocationRow[] = await api.getLocations(organizationId);
         if (cancelled) return;
         setLocations(locs);
-        let saved: string | null = null;
-        try { saved = localStorage.getItem('qms_operator_location'); } catch { /* private mode */ }
+        let saved: string | null = currentLocationId;
+        if (!saved) {
+          try { saved = localStorage.getItem('qms_operator_location'); } catch { /* private mode */ }
+        }
         const ordered = [...locs.filter((l) => l.id === saved), ...locs.filter((l) => l.id !== saved)];
         let chosen = ordered[0]?.id || '';
         // The suggested room may be at another location: open that one.
-        if (preferServicePointId && locs.length > 1) {
+        if (preferServicePointId && !currentLocationId && locs.length > 1) {
           for (const loc of ordered) {
             const found: DeskInstance[] = await api.getLocationInstances(loc.id).catch(() => []);
             if (cancelled) return;
@@ -50,21 +56,21 @@ export default function DeskPicker({ desk, compact = false, preferServicePointId
       }
     })();
     return () => { cancelled = true; };
-  }, [user?.organizationId, preferServicePointId]);
+  }, [user?.organizationId, preferServicePointId, currentLocationId]);
 
-  const load = (id: string) => {
+  const load = useCallback((id: string) => {
     setInstances(null);
     api.getLocationInstances(id).then(setInstances).catch(() => setInstances([]));
-  };
+  }, []);
 
   useEffect(() => {
     if (!locationId) return;
     try { localStorage.setItem('qms_operator_location', locationId); } catch { /* private mode */ }
     load(locationId);
-  }, [locationId]);
+  }, [locationId, load]);
 
-  const groups = useMemo(() => {
-    const byService = new Map<string, { name: string; items: DeskInstance[] }>();
+  const groups = useMemo<DeskRoomGroup[]>(() => {
+    const byService = new Map<string, DeskRoomGroup>();
     (instances || []).forEach((inst) => {
       if (!inst.currentService) return;
       const g = byService.get(inst.currentService.id) || { name: inst.currentService.name, items: [] };
@@ -73,7 +79,7 @@ export default function DeskPicker({ desk, compact = false, preferServicePointId
     });
     const groups = [...byService.values()];
     if (!preferServicePointId) return groups;
-    const hasPreferred = (g: { items: DeskInstance[] }) => g.items.some((i) => i.servicePointId === preferServicePointId);
+    const hasPreferred = (g: DeskRoomGroup) => g.items.some((i) => i.servicePointId === preferServicePointId);
     return [...groups.filter(hasPreferred), ...groups.filter((g) => !hasPreferred(g))];
   }, [instances, preferServicePointId]);
 
@@ -83,8 +89,6 @@ export default function DeskPicker({ desk, compact = false, preferServicePointId
     const all = groups.flatMap((g) => g.items).filter((i) => i.servicePointId === preferServicePointId);
     return (all.find((i) => i.occupiedBy?.id === user?.id) || all.find((i) => !i.isOccupied) || all[0])?.id ?? null;
   }, [groups, preferServicePointId, user?.id]);
-
-  useEffect(() => { suggested.current?.focus(); }, [suggestedId]);
 
   const choose = async (inst: DeskInstance) => {
     setProblem('');
@@ -101,6 +105,20 @@ export default function DeskPicker({ desk, compact = false, preferServicePointId
       setPending(null);
     }
   };
+
+  return { userId: user?.id ?? null, locations, locationId, setLocationId, instances, groups, suggestedId, pending, problem, choose };
+}
+
+export type DeskRooms = ReturnType<typeof useDeskRooms>;
+
+/** "Where are you working today?" Desks grouped by service, with the
+ * suggested room's first free desk focused. */
+export default function DeskPicker({ desk, compact = false, preferServicePointId = null }: { desk: Desk; compact?: boolean; preferServicePointId?: string | null }) {
+  const { isAdmin } = useAuthContext();
+  const { userId, locations, locationId, setLocationId, instances, groups, suggestedId, pending, problem, choose } = useDeskRooms(desk, preferServicePointId);
+  const suggested = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => { suggested.current?.focus(); }, [suggestedId]);
 
   return (
     <div className="desk-picker" data-compact={compact}>
@@ -126,7 +144,7 @@ export default function DeskPicker({ desk, compact = false, preferServicePointId
             <h3>{g.name}</h3>
             <div className="desk-picker-grid">
               {g.items.map((inst) => {
-                const mineAlready = inst.occupiedBy?.id === user?.id;
+                const mineAlready = !!userId && inst.occupiedBy?.id === userId;
                 const taken = inst.isOccupied && !mineAlready;
                 const isSuggested = inst.id === suggestedId;
                 return (

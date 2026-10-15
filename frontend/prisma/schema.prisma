@@ -123,6 +123,9 @@ model Location {
   //  "media":{"enabled":true,"mode":"interstitial"|"split","everySeconds":90},
   //  "callFlash":true}
   displayConfig     Json?
+  // The location's first point of contact (usually Reception): kiosk and QR
+  // joins with no service chosen go here. Null = they pick a service.
+  defaultServiceId  String?
   displayMedia      DisplayMedia[]
   displayPlaylists  DisplayPlaylist[]
 }
@@ -223,6 +226,9 @@ model Service {
   allowAnonymous  Boolean       @default(false)  // If true, can get ticket without any info
   // Display settings for this service's queue
   displayMode     String?       // TICKET_ONLY, NAME_AND_TICKET, FULL_INFO (null = use org default)
+  // Payment gate: someone joining this service waits "awaiting payment"
+  // (not callable) until cleared by staff or the connected EMR.
+  requiresClearance Boolean     @default(false)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   location        Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -309,6 +315,17 @@ model QueueEntry {
   // Wait time before being called (minutes)
   waitDuration           Int?
   notes                  String?
+  // On hold: taken off the desk while waiting for something (a result, a
+  // relative). Still WAITING, kept at the front, never picked by call next.
+  heldAt                 DateTime?
+  // The desk this entry belongs with: where it was put on hold, or the desk
+  // a patient returns to (back to the same consulting room). Plain id, no FK.
+  deskInstanceId         String?
+  // Waiting for payment in a service that requires clearance; not callable.
+  awaitingClearance      Boolean               @default(false)
+  // Who sent this entry here when it came from a transfer: staff, patient,
+  // integration; null for a first ticket or an automatic flow.
+  sentBy                 String?
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
   queue                  Queue                 @relation(fields: [queueId], references: [id], onDelete: Cascade)
@@ -321,6 +338,7 @@ model QueueEntry {
   @@index([journeyId])
   @@index([servicePointInstanceId])
   @@index([updatedAt])
+  @@index([previousEntryId])
 }
 
 model ServiceFlow {

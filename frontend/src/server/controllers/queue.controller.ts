@@ -6,7 +6,7 @@ import { emitToQueue, emitToService, emitToLocation, emitToQueueAndLocation, SOC
 import { generateTicketNumber, getNextSequence, generateQRData } from '../utils/ticket';
 import { getStartOfDay, startOfLocalDate, validTimeZone } from '../utils/date';
 import { v4 as uuidv4 } from 'uuid';
-import { WAITING_ORDER, computePosition, notifyEntry } from '../services/notifications.service';
+import { CALLABLE_WHERE, WAITING_ORDER, computePosition, notifyEntry } from '../services/notifications.service';
 import {
   recordQueueEvent,
   startJourney,
@@ -17,10 +17,21 @@ import {
   TransferError,
   setQueueStatus,
   getOrCreateQueueForDate,
+  journeySteps,
   serviceTimeZone,
   ORIGIN,
 } from '../services/queueEvents.service';
-import { joinQueueEntry, callEntry, serveEntry, endEntry, QueueActionError } from '../services/queueActions.service';
+import {
+  joinQueueEntry,
+  callEntry,
+  serveEntry,
+  endEntry,
+  holdEntry,
+  resumeEntry,
+  clearEntry,
+  QueueActionError,
+} from '../services/queueActions.service';
+import { successorOf } from './publicJourney.controller';
 import { staffNamesFor } from '../services/displayStaff';
 import { LookupError, joinIdentifierFor, locationRefFor, lookupPatient } from '../services/connectLookup.service';
 
@@ -148,14 +159,14 @@ export const callNext = async (req: Request, res: Response, next: NextFunction) 
     let claimedId: string | null = null;
     for (let attempt = 0; attempt < 5 && !claimedId; attempt++) {
       const candidate = await prisma.queueEntry.findFirst({
-        where: { queueId: id, status: 'WAITING' },
+        where: { queueId: id, ...CALLABLE_WHERE },
         orderBy: WAITING_ORDER,
         select: { id: true, joinedAt: true },
       });
       if (!candidate) break;
       const claimed = await prisma.queueEntry.updateMany({
-        where: { id: candidate.id, status: 'WAITING' },
-        data: { status: 'SERVING', calledAt: new Date(), waitDuration: minutesSince(candidate.joinedAt) },
+        where: { id: candidate.id, ...CALLABLE_WHERE },
+        data: { status: 'SERVING', calledAt: new Date(), waitDuration: minutesSince(candidate.joinedAt), deskInstanceId: null },
       });
       if (claimed.count === 1) claimedId = candidate.id;
     }
@@ -265,6 +276,45 @@ export const transferEntry = async (req: Request, res: Response, next: NextFunct
     });
   } catch (error) {
     if (error instanceof TransferError) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+};
+
+const actionError = (res: Response, error: QueueActionError) => res.status(error.status).json(error.body);
+
+// Put the person being served on hold (the desk is free for the next one).
+export const holdQueueEntry = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { changed } = await holdEntry(req.params.entryId, { actorUserId: actorId(req) });
+    res.json({ changed });
+  } catch (error) {
+    if (error instanceof QueueActionError) return actionError(res, error);
+    next(error);
+  }
+};
+
+// Call someone on hold back (to this desk, or the desk they were held at).
+export const resumeQueueEntry = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { changed } = await resumeEntry(
+      req.params.entryId,
+      { servicePointInstanceId: req.body?.servicePointInstanceId || null },
+      { actorUserId: actorId(req) }
+    );
+    res.json({ changed });
+  } catch (error) {
+    if (error instanceof QueueActionError) return actionError(res, error);
+    next(error);
+  }
+};
+
+// Mark someone waiting for payment as paid, so they can be called.
+export const clearQueueEntry = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { changed } = await clearEntry(req.params.entryId, { actorUserId: actorId(req) });
+    res.json({ changed });
+  } catch (error) {
+    if (error instanceof QueueActionError) return actionError(res, error);
     next(error);
   }
 };
@@ -396,6 +446,7 @@ export const publicJoinQueue = async (req: Request, res: Response, next: NextFun
         ticketNumber,
         priority: 0,
         notes: notes || null,
+        awaitingClearance: service.requiresClearance,
       },
     });
 
@@ -509,6 +560,8 @@ export const getPublicStatus = async (req: Request, res: Response, next: NextFun
                 status: true,
                 priority: true,
                 joinedAt: true,
+                heldAt: true,
+                awaitingClearance: true,
               },
             },
           },
@@ -538,9 +591,9 @@ export const getPublicStatus = async (req: Request, res: Response, next: NextFun
 
     // Calculate position for waiting entries
     let position: number | null = null;
-    if (entry.status === 'WAITING') {
+    if (entry.status === 'WAITING' && !entry.heldAt && !entry.awaitingClearance) {
       position = allEntries.filter(e => 
-        e.status === 'WAITING' && (
+        e.status === 'WAITING' && !e.heldAt && !e.awaitingClearance && (
           e.priority > entry.priority ||
           (e.priority === entry.priority && e.joinedAt < entry.joinedAt)
         )
@@ -565,9 +618,21 @@ export const getPublicStatus = async (req: Request, res: Response, next: NextFun
       select: { type: true, message: true, sentAt: true },
     });
 
+    // Where they were sent next, and the visit so far (no names).
+    const sent = await successorOf(entry.id);
+    const journey = (await journeySteps([{ entryId: entry.id, journeyId: entry.journeyId }])).get(entry.journeyId ?? `entry:${entry.id}`) ?? [];
+
     res.json({
       ticketNumber: entry.ticketNumber,
       status: entry.status,
+      held: !!entry.heldAt,
+      awaitingClearance: entry.awaitingClearance,
+      sentTo: sent
+        ? { serviceName: sent.queue.service.name, ticketNumber: sent.ticketNumber, status: sent.status, queueId: sent.queueId, entryId: sent.id }
+        : null,
+      journey: journey.map(({ entryId: id, ticketNumber, service, status, joinedAt, endedAt }) => ({
+        entryId: id, ticketNumber, serviceName: service.name, status, joinedAt, endedAt, current: id === entry.id,
+      })),
       queueStatus: queue.status,
       position,
       estimatedWaitTime,
@@ -708,7 +773,14 @@ export const getQueueEntriesForOperator = async (req: Request, res: Response, ne
     });
 
     const serving = queue.entries.filter(e => e.status === 'SERVING').map(attachServicePoint);
-    const waiting = queue.entries.filter(e => e.status === 'WAITING').map(attachServicePoint);
+    // On hold first (they keep their place at the front), then the line,
+    // then anyone still waiting for payment (not callable yet).
+    const rank = (e: typeof queue.entries[number]) => (e.heldAt ? 0 : e.awaitingClearance ? 2 : 1);
+    const waiting = queue.entries
+      .filter(e => e.status === 'WAITING')
+      .map((e, i) => ({ e, i }))
+      .sort((a, b) => rank(a.e) - rank(b.e) || a.i - b.i)
+      .map(({ e }) => attachServicePoint(e));
 
     // Get next service suggestions
     const nextServices = queue.service.flowsFrom.map(flow => ({
@@ -741,9 +813,25 @@ export const getQueueEntriesForOperator = async (req: Request, res: Response, ne
 };
 
 // Public join with session tracking
+/** The service a join with no service chosen goes to: the location's first
+ * point of contact (Location.defaultServiceId), when it's set and active. */
+export async function defaultServiceFor(locationId: unknown): Promise<string | null> {
+  if (typeof locationId !== 'string' || !locationId) return null;
+  const location = await prisma.location.findUnique({ where: { id: locationId }, select: { defaultServiceId: true } });
+  if (!location?.defaultServiceId) return null;
+  const service = await prisma.service.findFirst({
+    where: { id: location.defaultServiceId, locationId, isActive: true },
+    select: { id: true },
+  });
+  return service?.id ?? null;
+}
+
 export const publicJoinQueueWithSession = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { serviceId, phone, notes, sessionId, ...otherFields } = req.body;
+    const { phone, notes, sessionId } = req.body;
+    // No service chosen (kiosk or QR at the entrance): the location's first
+    // point of contact.
+    const serviceId: string | null = req.body.serviceId || (await defaultServiceFor(req.body.locationId));
     
     // Extract name from various possible fields (supports custom identity field configs)
     const name = req.body.name || req.body.fullName || 
@@ -849,6 +937,7 @@ export const publicJoinQueueWithSession = async (req: Request, res: Response, ne
         sortOrder: nextSortOrder,
         sessionId: userSessionId,
         notes: [notes, identifierNote].filter(Boolean).join('\n') || null,
+        awaitingClearance: service.requiresClearance,
       },
     });
 

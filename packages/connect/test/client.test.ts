@@ -129,6 +129,45 @@ describe('KlargyConnect', () => {
     expect(calls[3].url).toMatch(/\/by-ref\/visit\/V1\/no-show$/);
   });
 
+  it('holds, resumes and clears by ref, and links the entry being served', async () => {
+    const { fetch, calls } = mockFetch(json(200, { entry }), json(200, { entry }), json(200, { entry }), json(200, { entry }));
+    const c = client(fetch);
+    await c.holdEntry('visit', 'V1', { reason: 'Gone for a sample' });
+    expect(calls[0].url).toMatch(/\/by-ref\/visit\/V1\/hold$/);
+    expect(headersOf(calls[0])['Idempotency-Key']).toBeTruthy();
+    await c.resumeEntry('visit', 'V1', { staff: 'PR1' });
+    expect(calls[1].url).toMatch(/\/by-ref\/visit\/V1\/resume$/);
+    expect(JSON.parse(calls[1].init.body as string)).toEqual({ staff: 'PR1' });
+    await c.clearEntry('encounter', 'ENC-9');
+    expect(calls[2].url).toMatch(/\/by-ref\/encounter\/ENC-9\/clear$/);
+    const linked = await c.linkServingEntry({ staff: 'PR2', refs: { patient: 'P1', visit: 'V1' } });
+    expect(linked).toEqual({ entry, replayed: false });
+    expect(calls[3].url).toMatch(/\/connect\/v1\/entries\/serving\/link$/);
+    expect(calls[3].init.method).toBe('POST');
+    expect(JSON.parse(calls[3].init.body as string)).toEqual({ staff: 'PR2', refs: { patient: 'P1', visit: 'V1' } });
+  });
+
+  it('sends cleared on create and transfer, and reports the journey errors', async () => {
+    const { fetch, calls } = mockFetch(
+      json(201, { entry }),
+      json(201, { entry, from: null }),
+      json(409, { error: 'In another service', code: 'ENTRY_IN_OTHER_SERVICE', service: 's-lab' }),
+      json(404, { error: 'Nobody is being served', code: 'NO_SERVING_ENTRY' })
+    );
+    const c = client(fetch);
+    await c.createEntry({ service: 'CLIN-GP', refs: { patient: 'P1', visit: 'V1' }, cleared: true });
+    expect(JSON.parse(calls[0].init.body as string).cleared).toBe(true);
+    await c.transferEntry('visit', 'V1', { to: 'CLIN-GP', cleared: true });
+    expect(JSON.parse(calls[1].init.body as string)).toEqual({ to: 'CLIN-GP', cleared: true });
+    const other = await c.callEntry('visit', 'V1', { staff: 'PR1' }).catch((e) => e);
+    expect(other).toBeInstanceOf(ConnectError);
+    expect(other.code).toBe('ENTRY_IN_OTHER_SERVICE');
+    expect(other.body.service).toBe('s-lab');
+    const none = await c.linkServingEntry({ staff: 'PR2', refs: { patient: 'P1', visit: 'V1' } }).catch((e) => e);
+    expect(none.status).toBe(404);
+    expect(none.code).toBe('NO_SERVING_ENTRY');
+  });
+
   it('transfers and reports the completed entry', async () => {
     const from = { ...entry, status: 'SERVED' };
     const { fetch, calls } = mockFetch(json(201, { entry, from }), json(200, { entry, from: null }));

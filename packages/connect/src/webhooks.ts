@@ -25,6 +25,9 @@ export const WEBHOOK_EVENTS = [
   'entry.no_show',
   'entry.transferred',
   'entry.priority_changed',
+  'entry.held',
+  'entry.resumed',
+  'entry.cleared',
   'queue.paused',
   'queue.resumed',
   'appointment.created',
@@ -68,7 +71,13 @@ export type EntryEventData = Omit<Entry, 'refs'> &
     [extra: string]: unknown;
   };
 
-export type EntryTransferredData = EntryEventData & { fromEntryId: string; fromServiceId: string; toServiceId: string };
+/** `from`: the completed source entry (with its own `refs` on the integration's endpoint). */
+export type EntryTransferredData = EntryEventData & {
+  fromEntryId: string;
+  fromServiceId: string;
+  toServiceId: string;
+  from?: EntryEventData;
+};
 export type EntryPriorityChangedData = EntryEventData & { priority: number; previousPriority: number };
 export type AppointmentCheckedInData = EntryEventData & { appointmentId: string; patientId: string };
 
@@ -125,6 +134,9 @@ export interface WebhookDataMap {
   'entry.no_show': EntryEventData;
   'entry.transferred': EntryTransferredData;
   'entry.priority_changed': EntryPriorityChangedData;
+  'entry.held': EntryEventData;
+  'entry.resumed': EntryEventData;
+  'entry.cleared': EntryEventData;
   'queue.paused': QueueStatusEventData;
   'queue.resumed': QueueStatusEventData;
   'appointment.created': AppointmentEventData;

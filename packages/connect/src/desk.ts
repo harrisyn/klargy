@@ -14,6 +14,8 @@ export const DESK_MESSAGES = {
   waiting: 'klargy:waiting',
   entryCalled: 'klargy:entry-called',
   entryUpdated: 'klargy:entry-updated',
+  /** The height (px) the bar layout needs; additive in v1. */
+  resize: 'klargy:resize',
   /** Host to desk. */
   logout: 'klargy:logout',
 } as const;
@@ -32,7 +34,21 @@ export type DeskMessage =
   | { type: 'klargy:desk-changed'; servicePoint: DeskServicePoint | null }
   | { type: 'klargy:waiting'; count: number }
   | { type: 'klargy:entry-called'; entry: Entry }
-  | { type: 'klargy:entry-updated'; entry: Entry };
+  | { type: 'klargy:entry-updated'; entry: Entry }
+  /** Bar layout only: the frame height the desk needs now, in CSS pixels. */
+  | { type: 'klargy:resize'; height: number };
+
+/** How the desk lays itself out: the full panel, or one compact horizontal
+ * bar (about 60px tall, taller while a menu is open) for a floating toolbar. */
+export type DeskLayout = 'default' | 'bar';
+
+/** The launch URL with the layout set (`layout=bar`), or unchanged for the default. */
+export function deskUrl(url: string, layout: DeskLayout = 'default'): string {
+  if (layout === 'default') return url;
+  const parsed = new URL(url);
+  parsed.searchParams.set('layout', layout);
+  return parsed.toString();
+}
 
 /** Messages the parent may post to the desk. */
 export type HostMessage = { type: 'klargy:logout' };
@@ -56,6 +72,10 @@ export function parseDeskMessage(data: unknown): DeskMessage | null {
     case DESK_MESSAGES.waiting:
       return typeof data.count === 'number' && Number.isFinite(data.count) && data.count >= 0
         ? { type: DESK_MESSAGES.waiting, count: data.count }
+        : null;
+    case DESK_MESSAGES.resize:
+      return typeof data.height === 'number' && Number.isFinite(data.height) && data.height > 0
+        ? { type: DESK_MESSAGES.resize, height: data.height }
         : null;
     case DESK_MESSAGES.entryCalled:
     case DESK_MESSAGES.entryUpdated:
@@ -106,11 +126,16 @@ export interface EmbedDeskOptions {
   window?: MessageWindow;
   /** Title of a created iframe (for screen readers). */
   title?: string;
+  /** `bar` loads the compact one-row layout (adds `layout=bar` to `url`). */
+  layout?: DeskLayout;
   onReady?: (message: { contract: string }) => void;
   onDeskChanged?: (servicePoint: DeskServicePoint | null) => void;
   onWaiting?: (count: number) => void;
   onEntryCalled?: (entry: Entry) => void;
   onEntryUpdated?: (entry: Entry) => void;
+  /** Bar layout: the height the desk needs (row only, or with a menu open).
+   * Size the frame to it, within your own limits. */
+  onResize?: (height: number) => void;
   /** Every valid message, after the specific callback. */
   onMessage?: (message: DeskMessage) => void;
 }
@@ -132,6 +157,7 @@ export interface DeskEmbed {
  */
 export function embedDesk(options: EmbedDeskOptions): DeskEmbed {
   const origin = deskOrigin(options.url);
+  const src = deskUrl(options.url, options.layout);
   const win = options.window ?? (typeof window !== 'undefined' ? (window as MessageWindow) : undefined);
   if (!win) throw new TypeError('embedDesk needs a window (pass options.window outside a browser)');
 
@@ -173,11 +199,14 @@ export function embedDesk(options: EmbedDeskOptions): DeskEmbed {
       case 'klargy:entry-updated':
         options.onEntryUpdated?.(message.entry);
         break;
+      case 'klargy:resize':
+        options.onResize?.(message.height);
+        break;
     }
     options.onMessage?.(message);
   };
   win.addEventListener('message', listener);
-  frame.src = options.url;
+  frame.src = src;
 
   let destroyed = false;
   return {

@@ -285,7 +285,9 @@ Your practitioners can call and move patients from Klargy's desk inside your app
 
 The desk posts only to your `returnOrigin` and accepts `klargy:logout` only from it. `embedDesk` likewise accepts messages only from the frame's window and Klargy's origin. Messages are fire-and-forget: webhooks remain the record. If the code expired (for example the page was opened from history), the desk asks the practitioner to open it again: call `/desk/launch` again.
 
-Without the package, listen for `message` events where `event.origin` is the launch URL's origin. The types are `klargy:ready`, `klargy:desk-changed`, `klargy:waiting`, `klargy:entry-called` and `klargy:entry-updated` ([v1 section 6](./v1.md#6-the-desk-inside-the-emr-phase-3)). To sign out, post `{type: 'klargy:logout'}` to that origin.
+Without the package, listen for `message` events where `event.origin` is the launch URL's origin. The types are `klargy:ready`, `klargy:desk-changed`, `klargy:waiting`, `klargy:entry-called`, `klargy:entry-updated` and, in the bar layout, `klargy:resize` ([v1 section 6](./v1.md#6-the-desk-inside-the-emr-phase-3)).
+
+For a floating toolbar rather than a panel, add `layout=bar` to the URL (or pass `layout: 'bar'` to `embedDesk`): the desk becomes one row about 60px tall and posts `klargy:resize` with the height it needs when a menu opens or closes; size the frame to it with `onResize`. To sign out, post `{type: 'klargy:logout'}` to that origin.
 
 ## 6. Serve patient lookup
 
@@ -364,6 +366,35 @@ await klargy.set_service_status("CLIN-GP", {"status": "PAUSED"})
 
 `transfer` keeps the visit's journey and links the new ticket to the completed one. If the visit is already queued at `to`, it answers 200 and changes nothing, so you can call it on every relevant event in your EMR. Klargy's own service flows can transfer automatically when an entry is completed. Those events carry `origin.type: "system"`.
 
+### 7.1 The outpatient journey
+
+For a clinic that runs Reception, Cashier, Triage, Consultation, Laboratory, Imaging and Pharmacy in one waiting area, see [Running an outpatient journey](../guides/outpatient-journey.md). From the EMR side it uses:
+
+```ts
+// Consultation unpaid at check-in: the ticket waits for payment ("Awaiting payment" on the desk).
+await klargy.createEntry({ service: 'CLIN-GP', refs: { patient: p.id, visit: v.id }, cleared: false });
+// The bill is paid: the patient joins the line by when they arrived.
+await klargy.clearEntry('visit', v.id);
+
+// The doctor calls the patient into the room they are signed in to.
+await klargy.callEntry('visit', v.id, { staff: doctor.id });
+// Out for a sample and back.
+await klargy.holdEntry('visit', v.id);
+await klargy.resumeEntry('visit', v.id, { staff: doctor.id });
+
+// The receptionist serving a walk-in starts their visit in the EMR.
+await klargy.linkServingEntry({ staff: receptionist.id, refs: { patient: p.id, visit: v.id } });
+```
+
+```python
+await klargy.clear_entry("visit", visit.id)
+await klargy.call_entry("visit", visit.id, {"staff": doctor.id})
+await klargy.hold_entry("visit", visit.id)
+await klargy.link_serving_entry({"staff": receptionist.id, "refs": {"patient": p.id, "visit": visit.id}})
+```
+
+Every entry carries `held`, `awaitingClearance`, `sentBy` and `journey`; `entry.transferred` carries `from` (with `from.refs.encounter`, the encounter the patient just left). New events: `entry.held`, `entry.resumed`, `entry.cleared`. Handle `AWAITING_CLEARANCE`, `ENTRY_IN_OTHER_SERVICE` and `NO_SERVING_ENTRY`. Details: [v1 section 9](./v1.md#9-the-patient-journey-phase-6).
+
 ## 8. Appointments
 
 Mirror your appointments so Klargy sends its usual reminders and checks people in when they arrive:
@@ -428,6 +459,17 @@ Then:
 3. Sign in to the workspace as the admin and map the four services (and rooms) to your catalogue.
 4. Run a visit end to end: check in (`POST /entries`), call it from your app or the desk, transfer it to the lab and the cashier, and watch the pharmacy ticket appear by itself. Check that the webhooks arrive and that you ignore your own echoes.
 5. Use **Send test** on the connection page to check your webhook endpoint.
+
+#### Running both on one machine
+
+Two Klargy addresses matter, and locally they often differ:
+
+| Address | Used for | Example (Klargy in Docker on :8003) |
+| --- | --- | --- |
+| **API address** | Your server's Connect calls (`baseUrl`). Authenticated by the key; the host is ignored. | `http://host.docker.internal:8003` from an EMR in its own container, `http://localhost:8003` from the host |
+| **Workspace address** | What a browser opens: the desk iframe (`launchDesk` URL), `statusUrl`, the embed script. Always `<slug>.<APP_DOMAIN>`. | `http://acme-emr-sandbox.localhost:8003` |
+
+Klargy builds the workspace address from its `APP_URL` (in Docker, `http://localhost:8003` by default; with `npm run dev`, set `APP_URL=http://localhost:3000` or leave it empty and Klargy follows the address it is opened on). A container cannot resolve `*.localhost`, so don't use the workspace address as `baseUrl` from inside Docker, and don't hand the API address to a browser. Your `embedOrigin` is your EMR's browser origin (for example `http://localhost:3000`).
 
 Klargy only posts to public addresses. To receive webhooks on a laptop, use a tunnel (any https tunnel works). For your own automated tests, sign requests with `signedHeaders` (TypeScript) or `signature_headers` (Python) exactly as Klargy does.
 

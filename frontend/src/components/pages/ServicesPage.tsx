@@ -6,7 +6,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Layers } from 'lucide-react';
 import api from '@/api/client';
 import Layout from '@/components/Layout';
-import { PageHeader } from '@/components/ui';
+import { Checkbox, PageHeader } from '@/components/ui';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useSubscription, UpgradePrompt } from '@/contexts/SubscriptionContext';
 import type { Service, Location, Organization, ServiceType } from '@/types';
@@ -47,6 +47,7 @@ interface ServiceFormData {
   startTime: string;
   endTime: string;
   activeDays: string;
+  requiresClearance: boolean;
 }
 
 const ServicesPage: React.FC = () => {
@@ -77,6 +78,7 @@ const ServicesPage: React.FC = () => {
     startTime: '09:00',
     endTime: '17:00',
     activeDays: '1,2,3,4,5',
+    requiresClearance: false,
   });
 
   const loadOrganizations = useCallback(async () => {
@@ -150,6 +152,7 @@ const ServicesPage: React.FC = () => {
       requiresName: data.requiresName,
       requiresPhone: data.requiresPhone,
       allowAnonymous: data.allowAnonymous,
+      requiresClearance: data.requiresClearance,
       displayMode: data.displayMode || undefined,
       slotDuration: data.slotDuration,
       concurrentLimit: data.concurrentLimit,
@@ -214,6 +217,7 @@ const ServicesPage: React.FC = () => {
       startTime: service.startTime || '09:00',
       endTime: service.endTime || '17:00',
       activeDays: service.activeDays || '1,2,3,4,5',
+      requiresClearance: !!service.requiresClearance,
     });
     const linked = await api.getServicePointsForService(service.id);
     setEditServicePoints(linked.map((sp: LinkedServicePoint) => ({
@@ -241,6 +245,7 @@ const ServicesPage: React.FC = () => {
       startTime: '09:00',
       endTime: '17:00',
       activeDays: '1,2,3,4,5',
+      requiresClearance: false,
     });
   };
 
@@ -517,6 +522,14 @@ const ServicesPage: React.FC = () => {
                   placeholder="Describe the service..."
                   rows={3}
                   style={{ ...inputStyle, resize: 'vertical' }}
+                />
+              </div>
+
+              <div style={formFieldFull}>
+                <Checkbox
+                  checked={formData.requiresClearance}
+                  onChange={(e) => setFormData({ ...formData, requiresClearance: e.target.checked })}
+                  label="Wait for payment before they can be called (shown as “Awaiting payment” until staff or your records system clears it)"
                 />
               </div>
 

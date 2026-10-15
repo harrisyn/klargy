@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
+import { FLOW_TEMPLATES, TemplateError, applyFlowTemplate } from '../services/flowTemplates.service';
 
 // Get all service flows for a location's services
 export const getLocationFlows = async (req: Request, res: Response, next: NextFunction) => {
@@ -240,6 +241,33 @@ export const getNextServices = async (req: Request, res: Response, next: NextFun
 
     res.json(suggestions);
   } catch (error) {
+    next(error);
+  }
+};
+
+// Ready-made flows (flow designer "Use a template").
+export const listFlowTemplates = async (_req: Request, res: Response) => {
+  res.json(
+    Object.values(FLOW_TEMPLATES).map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      services: t.services.map((s) => ({ name: s.name, requiresClearance: !!s.requiresClearance })),
+      flows: t.flows,
+      defaultService: t.defaultService,
+    }))
+  );
+};
+
+export const applyFlowTemplateToLocation = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const template = FLOW_TEMPLATES[req.params.templateId];
+    if (!template) return res.status(404).json({ error: 'No such template' });
+    const { locationId } = req.body ?? {};
+    if (typeof locationId !== 'string' || !locationId) return res.status(400).json({ error: 'locationId is required' });
+    res.json(await applyFlowTemplate(template, locationId));
+  } catch (error) {
+    if (error instanceof TemplateError) return res.status(error.status).json({ error: error.message, ...error.body });
     next(error);
   }
 };

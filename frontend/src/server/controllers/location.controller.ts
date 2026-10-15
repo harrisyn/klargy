@@ -73,11 +73,17 @@ export const getLocation = async (req: Request, res: Response, next: NextFunctio
 export const updateLocation = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { name, address, timezone, publicCode } = req.body;
+    const { name, address, timezone, publicCode, defaultServiceId } = req.body;
+
+    // The first point of contact must be one of this location's services.
+    if (defaultServiceId !== undefined && defaultServiceId !== null) {
+      const svc = await prisma.service.findFirst({ where: { id: String(defaultServiceId), locationId: id }, select: { id: true } });
+      if (!svc) return res.status(400).json({ error: 'The first point of contact must be a service at this location' });
+    }
 
     const location = await prisma.location.update({
       where: { id },
-      data: { name, address, timezone, publicCode },
+      data: { name, address, timezone, publicCode, ...(defaultServiceId !== undefined ? { defaultServiceId: defaultServiceId || null } : {}) },
     });
 
     res.json(location);

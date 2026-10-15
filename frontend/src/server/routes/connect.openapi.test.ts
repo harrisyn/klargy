@@ -69,8 +69,8 @@ describe.skipIf(!existsSync(SPEC))('Connect OpenAPI description', () => {
   it('describes nothing the server does not serve', () => {
     const served = new Set(routes().map((r: { key: string }) => r.key));
     for (const key of ops.keys()) {
-      // transfer and priority are documented separately from the generic {action} route.
-      const generic = key.replace(/\/(transfer|priority)$/, '/{action}');
+      // transfer, priority, hold, resume and clear are documented separately from the generic {action} route.
+      const generic = key.replace(/\/(transfer|priority|hold|resume|clear)$/, '/{action}');
       expect(served.has(key) || served.has(generic), `${key} is served`).toBe(true);
     }
   });

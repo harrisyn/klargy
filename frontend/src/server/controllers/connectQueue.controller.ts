@@ -14,6 +14,9 @@ import {
   getOrCreateQueueForDate,
   toEntrySnapshot,
   withPositions,
+  withJourneys,
+  journeyRefs,
+  startJourney,
 } from '../services/queueEvents.service';
 import { notifyEntry } from '../services/notifications.service';
 import {
@@ -24,6 +27,9 @@ import {
   joinQueueEntry,
   serveEntry,
   setEntryPriority,
+  holdEntry,
+  resumeEntry,
+  clearEntry,
 } from '../services/queueActions.service';
 
 // Klargy Connect v1, phase 2 (docs/connect/v1.md section 5): patients and
@@ -53,7 +59,10 @@ export async function entryViews(integrationId: string, entryIds: string[]) {
   if (entryIds.length === 0) return [];
   const rows = await prisma.queueEntry.findMany({ where: { id: { in: entryIds } }, include: ENTRY_SNAPSHOT_INCLUDE });
   const byId = new Map(rows.map((r) => [r.id, toEntrySnapshot(r)]));
-  const snapshots = await withPositions(entryIds.map((id) => byId.get(id)).filter((s): s is NonNullable<typeof s> => !!s));
+  const snapshots = await journeyRefs(
+    integrationId,
+    await withJourneys(await withPositions(entryIds.map((id) => byId.get(id)).filter((s): s is NonNullable<typeof s> => !!s)))
+  );
   const refs = await buildRefs(integrationId, snapshots.map((s) => entryRefSubject(s, null)));
   return snapshots.map((s, i) => ({ ...s, refs: refs[i] }));
 }
@@ -261,6 +270,14 @@ export const putPatient = async (req: Request, res: Response, next: NextFunction
 // POST /entries
 // ---------------------------------------------------------------------------
 
+/** `cleared` (phase 6): true when the patient has already paid, so a
+ * service that requires clearance lets them straight into the line. */
+function clearedFlag(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value !== 'boolean') throw badRequest('cleared must be true or false');
+  return value;
+}
+
 function refString(refs: Record<string, unknown>, key: string, required: boolean) {
   return text(refs[key], `refs.${key}`, required);
 }
@@ -354,6 +371,7 @@ async function createEntry(req: Request): Promise<Result> {
   }
   if (body.notes !== undefined && body.notes !== null && typeof body.notes !== 'string') throw badRequest('notes must be a string');
   const notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim().slice(0, MAX_NOTES) : null;
+  const cleared = clearedFlag(body.cleared);
 
   const service = await resolveService(integration, serviceRef);
 
@@ -368,6 +386,8 @@ async function createEntry(req: Request): Promise<Result> {
     if (open) {
       if (encounterRef) await linkRef(integration, 'encounter', open.id, encounterRef);
       if (appointmentRef) await checkInAppointment(integration, appointmentRef, open.id);
+      // Paid since the ticket was issued: the gate opens.
+      if (cleared) await clearEntry(open.id, { origin: originOf(integration) });
       return { status: 200, body: { entry: await entryView(integration.id, open.id) } };
     }
   }
@@ -384,7 +404,7 @@ async function createEntry(req: Request): Promise<Result> {
   try {
     const { entry } = await joinQueueEntry(
       today.queue.id,
-      { userId, priority: priority as number, notes, journeyId: journey?.id ?? null },
+      { userId, priority: priority as number, notes, journeyId: journey?.id ?? null, cleared },
       { origin: originOf(integration) },
       {
         // References first, so entry.joined already carries them.
@@ -438,8 +458,8 @@ const ACTIONS = {
   'no-show': { status: 'NO_SHOW', from: ['WAITING', 'SERVING'] },
 } as const;
 type ActionName = keyof typeof ACTIONS;
-/** Phase 5 actions that don't just set a status. */
-const OTHER_ACTIONS = ['transfer', 'priority'] as const;
+/** Phase 5 and 6 actions that don't just set a status. */
+const OTHER_ACTIONS = ['transfer', 'priority', 'hold', 'resume', 'clear'] as const;
 const ACTION_NAMES = [...Object.keys(ACTIONS), ...OTHER_ACTIONS];
 const REF_TYPES = ['visit', 'encounter', 'entry'] as const;
 type RefType = (typeof REF_TYPES)[number];
@@ -449,13 +469,19 @@ const entryNotFound = () => new ConnectError('No such entry', 404, 'ENTRY_NOT_FO
 async function entryInOrg(integration: Caller, entryId: string) {
   return prisma.queueEntry.findFirst({
     where: { id: entryId, queue: { service: { location: { organizationId: integration.organizationId } } } },
-    select: { id: true, status: true, queueId: true, queue: { select: { serviceId: true } } },
+    select: { id: true, status: true, queueId: true, heldAt: true, awaitingClearance: true, queue: { select: { serviceId: true } } },
   });
 }
 
 /** The entry a by-ref call addresses. For a visit: the entry being served,
  * else the one waiting longest, among `serviceId`'s entries when given. */
-async function resolveEntry(integration: Caller, type: RefType, id: string, serviceId?: string | null) {
+async function resolveEntry(
+  integration: Caller,
+  type: RefType,
+  id: string,
+  serviceId?: string | string[] | null,
+  opts: { preferHeld?: boolean } = {}
+) {
   if (type !== 'visit') {
     const entryId = type === 'entry' ? id : await klargyIdFor(integration.id, 'encounter', id);
     const entry = entryId ? await entryInOrg(integration, entryId) : null;
@@ -468,14 +494,17 @@ async function resolveEntry(integration: Caller, type: RefType, id: string, serv
         where: {
           id: { in: journey.queueEntryIds },
           status: { in: [...OPEN] },
-          ...(serviceId ? { queue: { serviceId } } : {}),
+          ...(serviceId ? { queue: { serviceId: Array.isArray(serviceId) ? { in: serviceId } : serviceId } } : {}),
         },
         orderBy: { joinedAt: 'asc' },
         select: { id: true },
       })
     : [];
   const rows = await Promise.all(open.map((o) => entryInOrg(integration, o.id)));
-  const entry = rows.find((e) => e?.status === 'SERVING') ?? rows.find((e) => e?.status === 'WAITING');
+  const entry =
+    (opts.preferHeld ? rows.find((e) => e?.status === 'WAITING' && e.heldAt) : undefined) ??
+    rows.find((e) => e?.status === 'SERVING') ??
+    rows.find((e) => e?.status === 'WAITING');
   if (!entry) {
     throw new ConnectError(
       serviceId ? 'That visit has no waiting or serving entry for that service' : 'That visit has no waiting or serving entry',
@@ -525,6 +554,63 @@ async function staffUserFor(integration: Caller, value: string | undefined): Pro
   return user?.id ?? null;
 }
 
+/** The desks a staff member is signed in to right now, with their service. */
+async function staffDesks(userId: string) {
+  const desks = await prisma.servicePointInstance.findMany({
+    where: { occupiedByUserId: userId, isOccupied: true, isActive: true, servicePointService: { isActive: true, servicePoint: { isActive: true } } },
+    orderBy: { occupiedAt: 'desc' },
+    select: { id: true, servicePointService: { select: { serviceId: true } } },
+  });
+  return (desks ?? []).map((d) => ({ id: d.id, serviceId: d.servicePointService.serviceId }));
+}
+
+const inOtherService = (entryServiceId: string) =>
+  new ConnectError(
+    'That patient’s open ticket is in another service than the staff member’s room. Transfer it there first.',
+    409,
+    'ENTRY_IN_OTHER_SERVICE',
+    { service: entryServiceId }
+  );
+
+/**
+ * The entry a call or resume addresses and the desk to call it to (phase 6):
+ * `servicePoint` picks the room; else `staff` calls into the room that staff
+ * member is signed in to, choosing the visit's entry in that room's service.
+ * Without either (or when the staff member is in no room) there's no desk.
+ */
+async function entryAndDesk(
+  integration: Caller,
+  type: RefType,
+  ref: string,
+  body: Record<string, unknown>,
+  actorUserId: string | null,
+  opts: { preferHeld?: boolean } = {}
+) {
+  const servicePointRef = text(body.servicePoint, 'servicePoint', false);
+  const narrowed = await serviceSelector(integration, body.service);
+  const desks = !servicePointRef && actorUserId ? await staffDesks(actorUserId) : [];
+  let entry: Awaited<ReturnType<typeof resolveEntry>>;
+  if (type === 'visit' && !narrowed && desks.length) {
+    try {
+      entry = await resolveEntry(integration, type, ref, desks.map((d) => d.serviceId), opts);
+    } catch (error) {
+      if (!(error instanceof ConnectError) || error.code !== 'NO_OPEN_ENTRY') throw error;
+      entry = await resolveEntry(integration, type, ref, null, opts);
+    }
+  } else {
+    entry = await resolveEntry(integration, type, ref, narrowed, opts);
+  }
+  let desk: string | null = null;
+  if (servicePointRef) {
+    desk = await resolveDesk(integration, servicePointRef, entry.queue.serviceId, actorUserId);
+  } else if (desks.length) {
+    const here = desks.find((d) => d.serviceId === entry.queue.serviceId);
+    if (!here) throw inOtherService(entry.queue.serviceId);
+    desk = here.id;
+  }
+  return { entry, desk };
+}
+
 function priorityValue(value: unknown, required: boolean): number | undefined {
   if (value === undefined || value === null) {
     if (required) throw badRequest('priority is required');
@@ -541,6 +627,7 @@ function refusal(error: QueueActionError): never {
     throw new ConnectError('The entry changed status before this could be applied', 409, 'INVALID_TRANSITION');
   }
   if (error.code === 'INVALID_SERVICE_POINT') throw new ConnectError(error.message, 422, 'INVALID_SERVICE_POINT');
+  if (error.code === 'AWAITING_CLEARANCE') throw new ConnectError('This entry is awaiting payment and can’t be called until it is cleared', 409, 'AWAITING_CLEARANCE');
   if (error.code === 'LIMIT_REACHED') {
     const { message, limitType, current, limit } = error.body;
     throw new ConnectError(String(message), 403, 'LIMIT_REACHED', { limitType, current, limit });
@@ -556,6 +643,7 @@ async function transferByRef(integration: Caller, type: RefType, id: string, bod
   const encounterRef = text(body.encounter, 'encounter', false);
   const staffRef = text(body.staff, 'staff', false);
   const reason = text(body.reason, 'reason', false);
+  const cleared = clearedFlag(body.cleared);
   const fromServiceId = await serviceSelector(integration, body.service);
   const target = await resolveService(integration, toRef);
 
@@ -581,6 +669,7 @@ async function transferByRef(integration: Caller, type: RefType, id: string, bod
       : null;
     if (there) {
       if (encounterRef) await linkRef(integration, 'encounter', there.id, encounterRef);
+      if (cleared) await clearEntry(there.id, { origin: originOf(integration) });
       return { status: 200, body: { entry: await entryView(integration.id, there.id), from: null } };
     }
   }
@@ -620,6 +709,7 @@ async function transferByRef(integration: Caller, type: RefType, id: string, bod
       requireOpenSource: true,
       origin: originOf(integration),
       data: reason ? { reason } : undefined,
+      cleared,
     });
     newEntryId = entry.id;
   } catch (error) {
@@ -662,6 +752,57 @@ async function priorityByRef(integration: Caller, type: RefType, id: string, bod
   return { status: 200, body: { entry: await entryView(integration.id, entry.id) } };
 }
 
+/** POST …/hold, …/resume, …/clear (phase 6). Each returns 200 and changes
+ * nothing when the entry is already in that state. */
+async function gateByRef(
+  integration: Caller,
+  action: 'hold' | 'resume' | 'clear',
+  type: RefType,
+  ref: string,
+  body: Record<string, unknown>
+): Promise<Result> {
+  const encounterRef = text(body.encounter, 'encounter', false);
+  const staffRef = text(body.staff, 'staff', false);
+  const reason = text(body.reason, 'reason', false);
+  const actorUserId = await staffUserFor(integration, staffRef);
+  const ctx = { actorUserId, origin: originOf(integration), data: reason ? { reason } : undefined };
+
+  let entry: Awaited<ReturnType<typeof resolveEntry>>;
+  let desk: string | null = null;
+  if (action === 'resume') {
+    ({ entry, desk } = await entryAndDesk(integration, type, ref, body, actorUserId, { preferHeld: true }));
+  } else {
+    entry = await resolveEntry(integration, type, ref, await serviceSelector(integration, body.service));
+  }
+  if (encounterRef) await linkRef(integration, 'encounter', entry.id, encounterRef);
+
+  const refuse = (what: string) => {
+    throw new ConnectError(`An entry that is ${entry.status}${entry.heldAt ? ' (on hold)' : ''} can’t be ${what}`, 409, 'INVALID_TRANSITION', {
+      status: entry.status,
+    });
+  };
+  try {
+    if (action === 'hold') {
+      if (!(entry.status === 'WAITING' && entry.heldAt)) {
+        if (entry.status !== 'SERVING') refuse('put on hold');
+        await holdEntry(entry.id, ctx);
+      }
+    } else if (action === 'resume') {
+      if (entry.status !== 'SERVING') {
+        if (!(entry.status === 'WAITING' && entry.heldAt)) refuse('resumed');
+        await resumeEntry(entry.id, { servicePointInstanceId: desk }, ctx);
+      }
+    } else if (entry.awaitingClearance) {
+      if (entry.status !== 'WAITING') refuse('cleared');
+      await clearEntry(entry.id, ctx);
+    }
+  } catch (error) {
+    if (!(error instanceof QueueActionError)) throw error;
+    refusal(error);
+  }
+  return { status: 200, body: { entry: await entryView(integration.id, entry.id) } };
+}
+
 async function moveEntry(req: Request): Promise<Result> {
   const integration = caller(req);
   const { type, id, action } = req.params;
@@ -671,14 +812,21 @@ async function moveEntry(req: Request): Promise<Result> {
   const ref = text(id, 'id')!;
   if (action === 'transfer') return transferByRef(integration, type as RefType, ref, body);
   if (action === 'priority') return priorityByRef(integration, type as RefType, ref, body);
+  if (action === 'hold' || action === 'resume' || action === 'clear') return gateByRef(integration, action, type as RefType, ref, body);
 
   const step = ACTIONS[action as ActionName];
   const encounterRef = text(body.encounter, 'encounter', false);
-  const servicePointRef = text(body.servicePoint, 'servicePoint', false);
   const staffRef = text(body.staff, 'staff', false);
   const reason = text(body.reason, 'reason', false);
+  const actorUserId = await staffUserFor(integration, staffRef);
 
-  const entry = await resolveEntry(integration, type as RefType, ref, await serviceSelector(integration, body.service));
+  let entry: Awaited<ReturnType<typeof resolveEntry>>;
+  let desk: string | null = null;
+  if (action === 'call') {
+    ({ entry, desk } = await entryAndDesk(integration, type as RefType, ref, body, actorUserId));
+  } else {
+    entry = await resolveEntry(integration, type as RefType, ref, await serviceSelector(integration, body.service));
+  }
   if (encounterRef) await linkRef(integration, 'encounter', entry.id, encounterRef);
 
   // Already there: nothing to do, so retries are safe.
@@ -689,15 +837,11 @@ async function moveEntry(req: Request): Promise<Result> {
     });
   }
 
-  const actorUserId = await staffUserFor(integration, staffRef);
   const ctx = { actorUserId, origin: originOf(integration), data: reason ? { reason } : undefined };
   const onlyFrom = [...step.from];
   try {
     if (action === 'call') {
-      const servicePointInstanceId = servicePointRef
-        ? await resolveDesk(integration, servicePointRef, entry.queue.serviceId, actorUserId)
-        : null;
-      await callEntry(entry.queueId, { entryId: entry.id, servicePointInstanceId }, ctx);
+      await callEntry(entry.queueId, { entryId: entry.id, servicePointInstanceId: desk }, ctx);
     } else if (action === 'complete') {
       await serveEntry(entry.queueId, entry.id, ctx, { onlyFrom });
     } else {
@@ -713,6 +857,87 @@ async function moveEntry(req: Request): Promise<Result> {
 export const postEntryByRef = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await idempotent(req, res, () => moveEntry(req));
+  } catch (error) {
+    handle(error, res, next);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// POST /entries/serving/link (phase 6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Links a walk-in to the EMR: the entry being served right now at the desk
+ * the staff member is signed in to gets the EMR's patient and visit (and
+ * encounter, when given). For a receptionist who started a visit in the EMR
+ * for the person in front of them.
+ */
+async function linkServing(req: Request): Promise<Result> {
+  const integration = caller(req);
+  const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+  const staffRef = text(body.staff, 'staff')!;
+  const refs = (body.refs && typeof body.refs === 'object' ? body.refs : {}) as Record<string, unknown>;
+  const patientRef = refString(refs, 'patient', true)!;
+  const visitRef = refString(refs, 'visit', true)!;
+  const encounterRef = refString(refs, 'encounter', false);
+  const patientInput = body.patient === undefined || body.patient === null ? undefined : parsePatient(body.patient);
+
+  const noServing = () =>
+    new ConnectError('Nobody is being served at that staff member’s desk', 404, 'NO_SERVING_ENTRY');
+  const userId = await staffUserFor(integration, staffRef);
+  if (!userId) throw noServing();
+  const desks = await staffDesks(userId);
+  const serving = desks.length
+    ? await prisma.queueEntry.findFirst({
+        where: {
+          status: 'SERVING',
+          servicePointInstanceId: { in: desks.map((d) => d.id) },
+          queue: { service: { location: { organizationId: integration.organizationId } } },
+        },
+        orderBy: { calledAt: 'desc' },
+        select: { id: true, userId: true, journeyId: true },
+      })
+    : null;
+  if (!serving) throw noServing();
+
+  // The visit belongs to one patient: one already linked to someone else's
+  // journey can't be linked here.
+  const knownJourney = await klargyIdFor(integration.id, 'visit', visitRef);
+  if (knownJourney && knownJourney !== serving.journeyId) {
+    const other = await prisma.customerJourney.findUnique({ where: { id: knownJourney }, select: { userId: true } });
+    const knownPatient = await klargyIdFor(integration.id, 'patient', patientRef);
+    if (other && other.userId !== serving.userId && other.userId !== knownPatient) {
+      throw new ConnectError('That visit belongs to a different patient', 409, 'VISIT_PATIENT_MISMATCH');
+    }
+  }
+
+  // The person at the desk is this EMR patient from now on.
+  await linkRef(integration, 'patient', serving.userId, patientRef);
+  if (patientInput) {
+    const existing = await prisma.user.findUnique({ where: { id: serving.userId }, select: { identityData: true } });
+    await prisma.user.update({
+      where: { id: serving.userId },
+      data: {
+        firstName: patientInput.firstName,
+        lastName: patientInput.lastName,
+        ...(patientInput.phone !== undefined ? { phone: patientInput.phone } : {}),
+        identityData: identityData(existing?.identityData, patientInput) as object,
+      },
+    });
+  }
+  let journeyId = serving.journeyId;
+  if (!journeyId) {
+    await startJourney(serving.id);
+    journeyId = (await prisma.queueEntry.findUnique({ where: { id: serving.id }, select: { journeyId: true } }))?.journeyId ?? null;
+  }
+  if (journeyId) await linkRef(integration, 'visit', journeyId, visitRef);
+  if (encounterRef) await linkRef(integration, 'encounter', serving.id, encounterRef);
+  return { status: 200, body: { entry: await entryView(integration.id, serving.id) } };
+}
+
+export const postServingLink = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await idempotent(req, res, () => linkServing(req));
   } catch (error) {
     handle(error, res, next);
   }

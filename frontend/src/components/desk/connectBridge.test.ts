@@ -1,5 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
-import { isLogoutRequest, postToHost, readLaunch, saveLaunch, targetOriginFor, type DeskLaunch } from './connectBridge';
+import {
+  deskLayoutFrom,
+  isLogoutRequest,
+  postToHost,
+  readLaunch,
+  resizeReporter,
+  saveLaunch,
+  targetOriginFor,
+  withoutLaunchCode,
+  type DeskLaunch,
+  type DeskMessage,
+} from './connectBridge';
 
 // The desk talks only to the launch's returnOrigin (docs/connect/v1.md
 // section 6).
@@ -58,5 +69,50 @@ describe('launch storage', () => {
     expect(readLaunch(storage)).toEqual(launch);
     saveLaunch({ ...launch, origin: '*' }, storage);
     expect(readLaunch(storage)).toBeNull();
+  });
+});
+
+describe('bar layout', () => {
+  it('is chosen with layout=bar only', () => {
+    expect(deskLayoutFrom('?launch=abc&layout=bar')).toBe('bar');
+    expect(deskLayoutFrom('?layout=bar')).toBe('bar');
+    expect(deskLayoutFrom('?launch=abc')).toBe('default');
+    expect(deskLayoutFrom('?layout=wide')).toBe('default');
+    expect(deskLayoutFrom('')).toBe('default');
+  });
+
+  it('survives removing the one-time launch code', () => {
+    const after = withoutLaunchCode('?launch=abc&layout=bar');
+    expect(after).toBe('?layout=bar');
+    expect(deskLayoutFrom(after)).toBe('bar');
+    expect(withoutLaunchCode('?launch=abc')).toBe('');
+    expect(withoutLaunchCode('?layout=bar&launch=abc&popup=1')).toBe('?layout=bar&popup=1');
+  });
+});
+
+describe('resizeReporter', () => {
+  it('posts klargy:resize to the launch origin once per change, in whole pixels', () => {
+    const parent = { postMessage: vi.fn() };
+    const report = resizeReporter((message: DeskMessage) => postToHost(parent, launch, message));
+    report(60);
+    report(60);
+    report(247.3);
+    report(60.0);
+    expect(parent.postMessage.mock.calls).toEqual([
+      [{ type: 'klargy:resize', height: 60 }, 'https://emr.example.com'],
+      [{ type: 'klargy:resize', height: 248 }, 'https://emr.example.com'],
+      [{ type: 'klargy:resize', height: 60 }, 'https://emr.example.com'],
+    ]);
+  });
+
+  it('ignores nonsense heights and retries after a post that went nowhere', () => {
+    const post = vi.fn(() => false);
+    const report = resizeReporter(post);
+    report(0);
+    report(Number.NaN);
+    expect(post).not.toHaveBeenCalled();
+    report(60);
+    report(60);
+    expect(post).toHaveBeenCalledTimes(2);
   });
 });

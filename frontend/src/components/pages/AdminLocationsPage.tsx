@@ -17,6 +17,7 @@ interface Location {
   timezone: string;
   publicCode?: string;
   externalReference?: string;
+  defaultServiceId?: string | null;
   services?: any[];
 }
 
@@ -42,7 +43,10 @@ export default function AdminLocationsPage() {
     timezone: 'UTC',
     publicCode: '',
     externalReference: '',
+    defaultServiceId: '',
   });
+  // The services of the location being edited (for "first point of contact").
+  const [editServices, setEditServices] = useState<{ id: string; name: string }[]>([]);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
 
   useEffect(() => {
@@ -129,6 +133,7 @@ export default function AdminLocationsPage() {
         timezone: formData.timezone,
         publicCode: formData.publicCode || null,
         externalReference: formData.externalReference || null,
+        defaultServiceId: formData.defaultServiceId || null,
       });
       await loadLocations(orgId!);
       resetForm();
@@ -166,7 +171,10 @@ export default function AdminLocationsPage() {
       timezone: loc.timezone,
       publicCode: loc.publicCode || '',
       externalReference: loc.externalReference || '',
+      defaultServiceId: loc.defaultServiceId || '',
     });
+    setEditServices([]);
+    api.getServices(loc.id).then(setEditServices).catch(() => setEditServices([]));
     setShowForm(true);
     setShowDetails(false);
   };
@@ -176,7 +184,7 @@ export default function AdminLocationsPage() {
     setShowDetails(false);
     setSelectedLocation(null);
     setEditingLocation(null);
-    setFormData({ name: '', address: '', timezone: 'UTC', publicCode: '', externalReference: '' });
+    setFormData({ name: '', address: '', timezone: 'UTC', publicCode: '', externalReference: '', defaultServiceId: '' });
   };
 
   const getBaseUrl = () => typeof window !== 'undefined' ? window.location.origin : '';
@@ -522,6 +530,24 @@ export default function AdminLocationsPage() {
                     Customers can join queues at: <strong>/join/{formData.publicCode || '[code]'}</strong>
                   </p>
                 </div>
+                {editingLocation && (
+                  <div style={formField}>
+                    <label style={labelStyle}>First point of contact</label>
+                    <select
+                      value={formData.defaultServiceId}
+                      onChange={(e) => setFormData({ ...formData, defaultServiceId: e.target.value })}
+                      style={inputStyle}
+                    >
+                      <option value="">None: people choose a service</option>
+                      {editServices.map((svc) => (
+                        <option key={svc.id} value={svc.id}>{svc.name}</option>
+                      ))}
+                    </select>
+                    <p style={helpText}>
+                      Kiosk and QR joins go straight here (usually Reception) instead of asking which service.
+                    </p>
+                  </div>
+                )}
                 <div style={formField}>
                   <label style={labelStyle}>External Reference (Optional)</label>
                   <input

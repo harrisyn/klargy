@@ -67,7 +67,8 @@ async with KlargyConnect("https://acme.klargy.com", "klg_live_...") as klargy:
 | `upsert_patient(patient_id, body)` | `PUT /patients/{id}` |
 | `create_entry(body, idempotency_key=)` | `POST /entries` |
 | `entry_action(ref_type, ref_id, action, body, idempotency_key=)` | `POST /entries/by-ref/{type}/{id}/{action}` |
-| `call_entry`, `complete_entry`, `cancel_entry`, `no_show_entry`, `transfer_entry`, `set_entry_priority` | the same, one per action |
+| `call_entry`, `complete_entry`, `cancel_entry`, `no_show_entry`, `hold_entry`, `resume_entry`, `clear_entry`, `transfer_entry`, `set_entry_priority` | the same, one per action |
+| `link_serving_entry(body, idempotency_key=)` | `POST /entries/serving/link` |
 | `get_entry_by_ref(ref_type, ref_id, service=None)` | `GET /entries/by-ref/{type}/{id}[?service=]` |
 | `list_entries(updated_since, visit=None)` / `iter_entries(...)` | `GET /entries` (one page / every page) |
 | `launch_desk(body)` | `POST /desk/launch` |

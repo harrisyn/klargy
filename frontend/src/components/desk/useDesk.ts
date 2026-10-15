@@ -32,6 +32,12 @@ export interface DeskEntry {
   servicePointInstanceId?: string | null;
   servicePoint?: { id: string; name: string; displayName?: string | null } | null;
   servicePointInstance?: { instanceNumber?: number; displayName?: string | null } | null;
+  /** On hold: off the desk, at the front of the line, called back by hand. */
+  heldAt?: string | null;
+  /** Waiting for payment (a service that requires clearance): not callable. */
+  awaitingClearance?: boolean;
+  /** The desk they belong with (held there, or returning to it). */
+  deskInstanceId?: string | null;
   user?: { id: string; firstName: string; lastName: string; phone?: string | null } | null;
 }
 
@@ -71,6 +77,8 @@ export const deskLabel = (inst: DeskInstance) =>
 export const personName = (e?: DeskEntry | null) =>
   e?.user ? `${e.user.firstName} ${e.user.lastName}`.trim() : '';
 
+export const isCallable = (e: DeskEntry) => !e.heldAt && !e.awaitingClearance;
+
 export const minutesAgo = (iso?: string | null) =>
   iso ? Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)) : 0;
 
@@ -91,7 +99,8 @@ function errorText(err: unknown, fallback: string) {
 
 /** What the practitioner just did to an entry, for a host app (Klargy
  * Connect): `called` when they called someone, `updated` when an entry was
- * served, sent on, cancelled or marked as not here. */
+ * served, sent on, cancelled, marked as not here, put on hold or called back
+ * from hold. */
 export type DeskEntryEvent = 'called' | 'updated';
 
 export interface UseDeskOptions {
@@ -187,7 +196,9 @@ export function useDesk(options: UseDeskOptions = {}) {
     [data, desk?.instanceId]
   );
   const current = mine[0] || null;
-  const waiting = data?.waiting || [];
+  const waiting = useMemo(() => data?.waiting || [], [data]);
+  // Who "Call next" can pick: not on hold and not waiting for payment.
+  const callable = useMemo(() => waiting.filter((e) => isCallable(e)), [waiting]);
   const otherDesks = (data?.serving || []).filter((e) => e.servicePointInstanceId !== desk?.instanceId);
 
   // Tell people who've switched to another app that someone is waiting.
@@ -263,9 +274,12 @@ export function useDesk(options: UseDeskOptions = {}) {
   const callNext = useCallback((entryId?: string) => run('call', async () => {
     if (!queueId || !desk) return;
     setAfterComplete(null);
+    // Calling back someone on hold is a resume: the host hears entry-updated
+    // (as for the hold), not a new call.
+    const wasHeld = !!entryId && !!data?.waiting.find((e) => e.id === entryId)?.heldAt;
     const called = await api.callNextWithServicePoint(queueId, desk.instanceId, entryId);
-    report('called', called?.id);
-  }), [run, queueId, desk, report]);
+    report(wasHeld ? 'updated' : 'called', called?.id);
+  }), [run, queueId, desk, report, data]);
 
   const recall = useCallback(() => run('recall', async () => {
     if (!queueId || !current) return;
@@ -294,6 +308,34 @@ export function useDesk(options: UseDeskOptions = {}) {
     setAfterComplete(null);
   }), [run, queueId, afterComplete, report]);
 
+  // Send the person being served straight on to another service (their
+  // ticket here is finished and they get a new one there).
+  const transfer = useCallback((service: { serviceId: string; displayName: string }) => run('transfer', async () => {
+    if (!queueId || !current) return;
+    const entry = current;
+    const result = await api.transferEntry(queueId, entry.id, service.serviceId);
+    report('updated', entry.id);
+    report('updated', result.entry?.id);
+    setNotice(`${personName(entry) || entry.ticketNumber} is now ${result.ticketNumber} at ${result.serviceName || service.displayName}.`);
+  }), [run, queueId, current, report]);
+
+  // Take the person being served off the desk for now (waiting for a result,
+  // a relative): they stay at the front, and the desk can call the next one.
+  const hold = useCallback(() => run('hold', async () => {
+    if (!queueId || !current) return;
+    const entry = current;
+    await api.holdEntry(queueId, entry.id);
+    report('updated', entry.id);
+    setNotice(`${personName(entry) || entry.ticketNumber} is on hold. Call them back from the waiting list when they’re ready.`);
+  }), [run, queueId, current, report]);
+
+  // Someone waiting for payment has paid (cashier, or a staff member checked).
+  const clear = useCallback((entry: DeskEntry) => run('clear', async () => {
+    if (!queueId) return;
+    await api.clearEntry(queueId, entry.id);
+    setNotice(`${personName(entry) || entry.ticketNumber} is marked as paid and can be called.`);
+  }), [run, queueId]);
+
   const noShow = useCallback(() => run('noshow', async () => {
     if (!queueId || !current) return;
     await api.markNoShow(queueId, current.id);
@@ -321,9 +363,9 @@ export function useDesk(options: UseDeskOptions = {}) {
   }, [notice]);
 
   return {
-    ready, desk, data, current, waiting, otherDesks, busy, error, notice, afterComplete, terms,
+    ready, desk, data, current, waiting, callable, otherDesks, busy, error, notice, afterComplete, terms,
     setError, dismissAfterComplete: () => setAfterComplete(null),
-    signIn, leave, callNext, recall, complete, sendTo, noShow, reorder, refresh, finishOther,
+    signIn, leave, callNext, recall, complete, sendTo, transfer, hold, clear, noShow, reorder, refresh, finishOther,
   };
 }
 

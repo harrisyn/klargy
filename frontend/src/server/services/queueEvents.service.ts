@@ -3,7 +3,7 @@ import { emitToQueue, emitToLocation, SOCKET_EVENTS } from '../lib/realtime';
 import { generateTicketNumber, getNextSequence } from '../utils/ticket';
 import { getStartOfDay, generateTimeSlots, validTimeZone } from '../utils/date';
 import { dispatchWebhook, WebhookEvent } from './webhooks.service';
-import { WAITING_ORDER, notifyEntry, notifyPositions } from './notifications.service';
+import { CALLABLE_WHERE, WAITING_ORDER, notifyEntry, notifyPositions } from './notifications.service';
 import { statusUrlFor } from '../config/appConfig';
 import { buildRefs, RefSubject } from './externalRefs.service';
 
@@ -23,6 +23,9 @@ export type QueueAction =
   | 'entry.transferred'
   | 'entry.reordered'
   | 'entry.priority_changed'
+  | 'entry.held'
+  | 'entry.resumed'
+  | 'entry.cleared'
   | 'queue.status_changed'
   | 'queue.paused'
   | 'queue.resumed'
@@ -36,7 +39,7 @@ export type QueueAction =
 
 const WEBHOOK_ACTIONS = new Set<string>([
   'entry.joined', 'entry.called', 'entry.served', 'entry.cancelled', 'entry.no_show', 'entry.transferred',
-  'entry.priority_changed', 'queue.paused', 'queue.resumed',
+  'entry.priority_changed', 'entry.held', 'entry.resumed', 'entry.cleared', 'queue.paused', 'queue.resumed',
   'appointment.created', 'appointment.rescheduled', 'appointment.cancelled', 'appointment.checked_in',
   'journey.completed', 'servicepoint.opened', 'servicepoint.closed',
 ]);
@@ -86,6 +89,9 @@ export const ENTRY_SNAPSHOT_INCLUDE = {
   servicePointInstance: { select: { servicePointService: { select: { servicePoint: { select: { id: true, name: true } } } } } },
 } as const;
 
+/** Who sent an entry to its service, for one made by a transfer. */
+export type SentBy = 'staff' | 'patient' | 'integration';
+
 type SnapshotEntry = {
   id: string;
   ticketNumber: string;
@@ -97,6 +103,9 @@ type SnapshotEntry = {
   calledAt: Date | null;
   servedAt: Date | null;
   completedAt: Date | null;
+  heldAt?: Date | null;
+  awaitingClearance?: boolean;
+  sentBy?: string | null;
   user: { id: string; firstName: string; lastName: string; phone: string | null; identityData: unknown };
   queue: {
     service: {
@@ -125,6 +134,14 @@ export function toEntrySnapshot(entry: SnapshotEntry) {
     servedAt: entry.servedAt,
     completedAt: entry.completedAt,
     patient: entry.user,
+    /** On hold: off the desk, kept at the front, not picked by call next. */
+    held: !!entry.heldAt,
+    /** Waiting for payment in a service that requires clearance. */
+    awaitingClearance: !!entry.awaitingClearance,
+    /** Who sent it here, for an entry made by a transfer. */
+    sentBy: (entry.sentBy ?? null) as SentBy | null,
+    /** The visit's entries, oldest first (see withJourneys). */
+    journey: [] as JourneyStep[],
     statusUrl: statusUrlFor(entry.queueId, entry.id, entry.queue.service.location.organization?.slug),
     /** 1-based place in line while WAITING, else null (see withPositions). */
     position: null as number | null,
@@ -132,6 +149,66 @@ export function toEntrySnapshot(entry: SnapshotEntry) {
 }
 
 export type EntrySnapshot = ReturnType<typeof toEntrySnapshot>;
+
+/** One stop of a visit: an entry in its journey. `service.ref` is the
+ * integration's own id for the service (null outside Connect). */
+export interface JourneyStep {
+  entryId: string;
+  ticketNumber: string;
+  service: { id: string; ref: string | null; name: string };
+  status: string;
+  joinedAt: Date;
+  endedAt: Date | null;
+}
+
+/** The journey steps of entries, by journey id (an entry with none is its
+ * own one-step journey). Oldest first. */
+export async function journeySteps(entries: { entryId: string; journeyId: string | null }[]): Promise<Map<string, JourneyStep[]>> {
+  const journeyIds = [...new Set(entries.map((e) => e.journeyId).filter((id): id is string => !!id))];
+  const loose = entries.filter((e) => !e.journeyId).map((e) => e.entryId);
+  if (journeyIds.length === 0 && loose.length === 0) return new Map();
+  const rows = await prisma.queueEntry.findMany({
+    where: { OR: [...(journeyIds.length ? [{ journeyId: { in: journeyIds } }] : []), ...(loose.length ? [{ id: { in: loose } }] : [])] },
+    orderBy: [{ joinedAt: 'asc' }, { createdAt: 'asc' }],
+    select: {
+      id: true, ticketNumber: true, status: true, joinedAt: true, completedAt: true, journeyId: true,
+      queue: { select: { service: { select: { id: true, name: true } } } },
+    },
+  });
+  const byKey = new Map<string, JourneyStep[]>();
+  for (const r of rows ?? []) {
+    const key = r.journeyId ?? `entry:${r.id}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)!.push({
+      entryId: r.id,
+      ticketNumber: r.ticketNumber,
+      service: { id: r.queue.service.id, ref: null, name: r.queue.service.name },
+      status: r.status,
+      joinedAt: r.joinedAt,
+      endedAt: r.completedAt,
+    });
+  }
+  return byKey;
+}
+
+/** Fills in `journey` (service refs null; see journeyRefs). */
+export async function withJourneys<T extends { entryId: string; journeyId: string | null; journey: JourneyStep[] }>(snapshots: T[]): Promise<T[]> {
+  if (snapshots.length === 0) return snapshots;
+  const steps = await journeySteps(snapshots);
+  return snapshots.map((s) => ({ ...s, journey: steps.get(s.journeyId ?? `entry:${s.entryId}`) ?? [] }));
+}
+
+/** The same journeys with one integration's ids for their services. */
+export async function journeyRefs<T extends { journey: JourneyStep[] }>(integrationId: string, snapshots: T[]): Promise<T[]> {
+  const serviceIds = [...new Set(snapshots.flatMap((s) => s.journey.map((j) => j.service.id)))];
+  if (serviceIds.length === 0) return snapshots;
+  const refs = await buildRefs(integrationId, serviceIds.map((service) => ({ service })));
+  const refOf = new Map(serviceIds.map((id, i) => [id, refs[i]?.service ?? null]));
+  return snapshots.map((s) => ({
+    ...s,
+    journey: s.journey.map((j) => ({ ...j, service: { ...j.service, ref: refOf.get(j.service.id) ?? null } })),
+  }));
+}
 
 /** Fills in `position` for waiting entries: the same order staff call people. */
 export async function withPositions<T extends { entryId: string; queueId: string; status: string; position: number | null }>(
@@ -141,7 +218,7 @@ export async function withPositions<T extends { entryId: string; queueId: string
   if (queueIds.length === 0) return snapshots;
   const places = new Map<string, number>();
   for (const queueId of queueIds) {
-    const waiting = await prisma.queueEntry.findMany({ where: { queueId, status: 'WAITING' }, orderBy: WAITING_ORDER, select: { id: true } });
+    const waiting = await prisma.queueEntry.findMany({ where: { queueId, ...CALLABLE_WHERE }, orderBy: WAITING_ORDER, select: { id: true } });
     waiting.forEach((e, i) => places.set(e.id, i + 1));
   }
   return snapshots.map((s) => (s.status === 'WAITING' ? { ...s, position: places.get(s.entryId) ?? null } : s));
@@ -163,7 +240,12 @@ export function entryRefSubject(snapshot: EntrySnapshot, actorUserId?: string | 
 export async function entrySnapshot(entryId: string) {
   const entry = await prisma.queueEntry.findUnique({ where: { id: entryId }, include: ENTRY_SNAPSHOT_INCLUDE });
   if (!entry) return null;
-  const [snapshot] = await withPositions([toEntrySnapshot(entry)]);
+  const [positioned] = await withPositions([toEntrySnapshot(entry)]);
+  // The journey is extra detail: an event still goes out without it.
+  const snapshot = await withJourneys([positioned]).then(([s]) => s, (error) => {
+    console.error('journey for entry snapshot failed:', error);
+    return positioned;
+  });
   return { organizationId: entry.queue.service.location.organizationId, snapshot };
 }
 
@@ -178,6 +260,9 @@ async function queueContext(queueId: string) {
 export async function recordQueueEvent(input: QueueEventInput): Promise<void> {
   try {
     const snap = input.entryId && !input.payload ? await entrySnapshot(input.entryId) : null;
+    // A transfer's source entry, with its own refs (visit, encounter).
+    const fromId = typeof input.data?.fromEntryId === 'string' && snap ? input.data.fromEntryId : null;
+    const from = fromId ? (await entrySnapshot(fromId))?.snapshot ?? null : null;
     const queueCtx = !snap && input.queueId ? await queueContext(input.queueId) : null;
     const organizationId = input.organizationId ?? snap?.organizationId ?? queueCtx?.organizationId ?? null;
     if (!organizationId) return;
@@ -215,10 +300,24 @@ export async function recordQueueEvent(input: QueueEventInput): Promise<void> {
         organizationId,
         input.action as WebhookEvent,
         {
-          ...(input.payload ?? { ...(snap?.snapshot ?? {}), ...(input.data ?? {}) }),
+          ...(input.payload ?? { ...(snap?.snapshot ?? {}), ...(input.data ?? {}), ...(from ? { from } : {}) }),
           origin: { type: origin.type, integrationId: origin.integrationId ?? null },
         },
-        async (integrationId) => (await buildRefs(integrationId, [refSubject]))[0]
+        async (integrationId) => (await buildRefs(integrationId, [refSubject]))[0],
+        // The integration's own ids inside the entry: journey services, and
+        // the source entry's refs on a transfer.
+        snap
+          ? async (integrationId) => {
+              const [withRefs] = await journeyRefs(integrationId, [snap.snapshot]);
+              const extra: Record<string, unknown> = { journey: withRefs.journey };
+              if (from) {
+                const [fromRefs] = await buildRefs(integrationId, [entryRefSubject(from, null)]);
+                const [fromJourney] = await journeyRefs(integrationId, [from]);
+                extra.from = { ...fromJourney, refs: fromRefs };
+              }
+              return extra;
+            }
+          : undefined
       );
     }
   } catch (error) {
@@ -302,9 +401,9 @@ export async function afterQueueChange(queueId: string): Promise<void> {
   }
 }
 
-export async function afterEntryCalled(entryId: string, servicePointName?: string | null): Promise<void> {
+export async function afterEntryCalled(entryId: string, servicePointName?: string | null, since?: Date): Promise<void> {
   try {
-    await notifyEntry(entryId, 'NOW_SERVING', { servicePointName });
+    await notifyEntry(entryId, 'NOW_SERVING', { servicePointName, since });
   } catch (error) {
     console.error('afterEntryCalled failed:', error);
   }
@@ -355,6 +454,19 @@ export async function getOrCreateQueueForDate(serviceId: string, date: Date = ne
   }
 }
 
+/** The desk that last saw this visit in a service, if it's still a desk
+ * for that service. */
+async function lastDeskInJourney(journeyId: string | null, serviceId: string): Promise<string | null> {
+  if (!journeyId) return null;
+  const last = await prisma.queueEntry.findFirst({
+    where: { journeyId, queue: { serviceId }, servicePointInstanceId: { not: null } },
+    orderBy: { joinedAt: 'desc' },
+    select: { servicePointInstance: { select: { id: true, isActive: true, servicePointService: { select: { serviceId: true } } } } },
+  });
+  const desk = last?.servicePointInstance;
+  return desk && desk.isActive && desk.servicePointService.serviceId === serviceId ? desk.id : null;
+}
+
 export class TransferError extends Error {
   constructor(message: string, public status = 400, public code?: 'NOT_FOUND' | 'QUEUE_CLOSED' | 'INVALID_TRANSITION') {
     super(message);
@@ -379,6 +491,11 @@ export async function transferEntryToService(
     requireOpenSource?: boolean;
     /** Extra fields for the event (audit log and webhook data). */
     data?: Record<string, unknown>;
+    /** Payment already settled: skip the target's clearance gate. */
+    cleared?: boolean;
+    /** Who is sending them (default: integration for a Connect call, staff
+     * when someone acts, none for an automatic flow). */
+    sentBy?: SentBy | null;
   } = {}
 ) {
   const source = await prisma.queueEntry.findUnique({
@@ -415,6 +532,19 @@ export async function transferEntryToService(
   const sequence = await getNextSequence(prisma, target.queue.id);
   const ticketNumber = generateTicketNumber(target.service.name.charAt(0).toUpperCase(), sequence);
   const lastEntry = await prisma.queueEntry.findFirst({ where: { queueId: target.queue.id }, orderBy: { sortOrder: 'desc' } });
+  const sentBy: SentBy | null =
+    opts.sentBy !== undefined
+      ? opts.sentBy
+      : opts.origin?.type === 'integration'
+        ? 'integration'
+        : opts.origin?.type === 'system'
+          ? null
+          : opts.actorUserId
+            ? 'staff'
+            : null;
+  // Back to a service they've already been to this visit (say, back to the
+  // doctor with lab results): they return to the desk that saw them.
+  const deskInstanceId = await lastDeskInJourney(source.journeyId, toServiceId);
 
   const newEntry = await prisma.queueEntry.create({
     data: {
@@ -427,6 +557,9 @@ export async function transferEntryToService(
       journeyId: source.journeyId,
       previousEntryId: source.id,
       notes: `Transferred from ${source.queue.service.name}`,
+      awaitingClearance: !!target.service.requiresClearance && !opts.cleared,
+      sentBy,
+      deskInstanceId,
     },
     include: { user: { select: { id: true, firstName: true, lastName: true } } },
   });

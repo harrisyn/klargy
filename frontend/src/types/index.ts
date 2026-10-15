@@ -38,6 +38,8 @@ export interface Location {
   timezone: string;
   externalReference?: string;
   publicCode?: string;
+  /** First point of contact: kiosk and QR joins with no service chosen go here. */
+  defaultServiceId?: string | null;
   services?: Service[];
 }
 
@@ -78,6 +80,8 @@ export interface Service {
   requiresName?: boolean;
   requiresPhone?: boolean;
   allowAnonymous?: boolean;
+  /** Payment gate: joiners wait "awaiting payment" until cleared. */
+  requiresClearance?: boolean;
   displayMode?: string;
   location?: Location;
   practitioners?: Practitioner[];

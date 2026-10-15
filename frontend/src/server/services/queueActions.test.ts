@@ -16,7 +16,7 @@ vi.mock('../lib/realtime', () => ({
 }));
 vi.mock('../middleware/subscription.middleware', () => ({ checkLimit: vi.fn().mockResolvedValue({ allowed: true }) }));
 vi.mock('../utils/ticket', () => ({ generateTicketNumber: () => 'G001', getNextSequence: async () => 1 }));
-vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], computePosition: vi.fn(async () => 1) }));
+vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false }, computePosition: vi.fn(async () => 1) }));
 vi.mock('./queueEvents.service', () => ({
   recordQueueEvent: vi.fn(),
   startJourney: vi.fn(),

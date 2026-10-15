@@ -7,6 +7,8 @@ import {
   deleteServiceFlow,
   updateFlowOrder,
   getNextServices,
+  listFlowTemplates,
+  applyFlowTemplateToLocation,
 } from '../controllers/serviceflow.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { scope, location, service, serviceFlow, each } from '../middleware/tenantScope.middleware';
@@ -14,6 +16,10 @@ import { scope, location, service, serviceFlow, each } from '../middleware/tenan
 const router = Router();
 
 router.use(authenticate);
+
+// Ready-made flows
+router.get('/templates', listFlowTemplates);
+router.post('/templates/:templateId/apply', authorize('SUPER_ADMIN', 'ORG_ADMIN', 'LOCATION_ADMIN'), scope(location('body.locationId')), applyFlowTemplateToLocation);
 
 // Flow management
 router.get('/location/:locationId', scope(location('params.locationId')), getLocationFlows);

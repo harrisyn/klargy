@@ -29,8 +29,10 @@ docker compose up
 Migrations run automatically when the app container starts. To create a
 superadmin: `docker exec qms-app node scripts/create-superadmin.js`.
 
-Without Docker: `cd frontend && npm install && npm run dev` (needs a `.env`
-based on `frontend/.env.example`).
+Settings for Docker go in the repo-root `.env` (see `.env.example`). Without
+Docker: `cd frontend && npm install && npm run dev` (needs a `.env` based on
+`frontend/.env.example`; set `APP_URL=http://localhost:3000` there, or leave it
+empty in development and links follow the address you open).
 
 ## Layout
 
@@ -80,6 +82,7 @@ webhooks, the staff desk framed in the EMR, patient lookup and journey
 automation.
 
 - [docs/connect/guide.md](docs/connect/guide.md): step-by-step integration guide for a new EMR, including the sandbox
+- [docs/guides/outpatient-journey.md](docs/guides/outpatient-journey.md): running an outpatient journey (reception, cashier, triage, consultation, lab, imaging, pharmacy) in Klargy and from the EMR
 - [docs/connect/v1.md](docs/connect/v1.md): the contract; [docs/connect/openapi.yaml](docs/connect/openapi.yaml): the same as OpenAPI 3.1
 - SDKs: [`@klargy/connect`](packages/connect) (TypeScript: client, webhook and lookup verification, desk embed) and [`klargy-connect`](sdks/python/klargy-connect) (Python)
 
@@ -87,6 +90,7 @@ automation.
 
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): Vercel and Docker deployment, environment variables
 - [docs/connect/guide.md](docs/connect/guide.md): integrating an EMR (Klargy Connect)
+- [docs/guides/outpatient-journey.md](docs/guides/outpatient-journey.md): running an outpatient journey
 - [docs/superpowers/tracker.md](docs/superpowers/tracker.md): live checklist of done / open work
 - [TECHNICAL_PRD.md](TECHNICAL_PRD.md): product requirements
 - [docs/superpowers/specs/](docs/superpowers/specs/): design specs per feature

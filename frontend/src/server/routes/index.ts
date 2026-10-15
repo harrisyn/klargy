@@ -35,6 +35,7 @@ import {
   updatePublicEntryIdentity,
   getPublicEntryIdentity,
 } from '../controllers/queue.controller';
+import { getPublicNextSteps, postPublicMove } from '../controllers/publicJourney.controller';
 import { getActiveServicePoints } from '../controllers/servicepoint.controller';
 import {
   registerOrganization,
@@ -58,6 +59,8 @@ router.get('/public/locations', getPublicLocations);
 router.get('/public/locations/:code', getLocationByCode);
 router.post('/public/join', limits.publicJoin, publicJoinQueueWithSession);
 router.get('/public/status/:queueId/:entryId', getPublicStatus);
+router.get('/public/status/:queueId/:entryId/next-steps', getPublicNextSteps);
+router.post('/public/status/:queueId/:entryId/move', limits.selfMove, postPublicMove);
 router.get('/public/session/:sessionId/tickets', getSessionTickets);
 router.get('/public/display/:locationId', getActiveServicePoints);
 router.get('/public/display/:locationId/content', getPublicDisplayContent);

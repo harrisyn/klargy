@@ -3,10 +3,26 @@ import crypto from 'crypto';
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 
+/** The same development-only default docker-compose.yml uses. */
+export const DEV_MASTER_ENCRYPTION_KEY = 'dev-only-master-encryption-key-change-in-production';
+let warnedDevKey = false;
+
 function getMasterKey(): Buffer {
-  const raw = process.env.MASTER_ENCRYPTION_KEY;
+  let raw = process.env.MASTER_ENCRYPTION_KEY;
   if (!raw) {
-    throw new Error('MASTER_ENCRYPTION_KEY is not set');
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'MASTER_ENCRYPTION_KEY is not set. Set it to a random secret (openssl rand -hex 32) and keep it the same ' +
+          'across deploys: it encrypts payment keys, integration credentials and webhook secrets at rest.'
+      );
+    }
+    // Development (npm run dev without Docker): the docker-compose default, so
+    // secrets saved locally stay readable between the two setups.
+    if (!warnedDevKey) {
+      warnedDevKey = true;
+      console.warn('MASTER_ENCRYPTION_KEY is not set: using the development-only default. Set it in .env for anything shared.');
+    }
+    raw = DEV_MASTER_ENCRYPTION_KEY;
   }
   // Derive a stable 32-byte key from whatever-length secret is provided
   return crypto.createHash('sha256').update(raw).digest();

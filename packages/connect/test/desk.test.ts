@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CONTRACT, DESK_MESSAGES, deskOrigin, embedDesk, parseDeskMessage } from '../src/desk';
+import { CONTRACT, DESK_MESSAGES, deskOrigin, deskUrl, embedDesk, parseDeskMessage } from '../src/desk';
 
 const URL_ = 'https://acme.klargy.com/widget/desk?launch=abc';
 const ORIGIN = 'https://acme.klargy.com';
@@ -33,6 +33,7 @@ describe('parseDeskMessage', () => {
     expect(parseDeskMessage({ type: 'klargy:waiting', count: 4 })).toEqual({ type: 'klargy:waiting', count: 4 });
     expect(parseDeskMessage({ type: 'klargy:entry-called', entry })).toEqual({ type: 'klargy:entry-called', entry });
     expect(parseDeskMessage({ type: 'klargy:entry-updated', entry })).toEqual({ type: 'klargy:entry-updated', entry });
+    expect(parseDeskMessage({ type: 'klargy:resize', height: 64 })).toEqual({ type: 'klargy:resize', height: 64 });
   });
 
   it('rejects anything else', () => {
@@ -46,6 +47,11 @@ describe('parseDeskMessage', () => {
       { type: 'klargy:entry-called', entry: {} },
       { type: 'klargy:desk-changed', servicePoint: { id: 1 } },
       { type: 'klargy:logout' },
+      { type: 'klargy:resize' },
+      { type: 'klargy:resize', height: 0 },
+      { type: 'klargy:resize', height: -10 },
+      { type: 'klargy:resize', height: '64' },
+      { type: 'klargy:resize', height: Number.POSITIVE_INFINITY },
       { type: 'other' },
     ]) {
       expect(parseDeskMessage(data)).toBeNull();
@@ -59,6 +65,7 @@ describe('parseDeskMessage', () => {
       'klargy:waiting',
       'klargy:entry-called',
       'klargy:entry-updated',
+      'klargy:resize',
       'klargy:logout',
     ]);
   });
@@ -69,6 +76,18 @@ describe('deskOrigin', () => {
     expect(deskOrigin(URL_)).toBe(ORIGIN);
     expect(deskOrigin('http://localhost:8003/widget/desk?launch=x')).toBe('http://localhost:8003');
     expect(() => deskOrigin('javascript:alert(1)')).toThrow();
+  });
+});
+
+describe('deskUrl', () => {
+  it('adds layout=bar and keeps the launch code', () => {
+    expect(deskUrl(URL_, 'bar')).toBe('https://acme.klargy.com/widget/desk?launch=abc&layout=bar');
+    expect(deskUrl('https://acme.klargy.com/widget/desk?launch=abc&layout=x', 'bar')).toBe('https://acme.klargy.com/widget/desk?launch=abc&layout=bar');
+  });
+
+  it('leaves the URL alone for the default layout', () => {
+    expect(deskUrl(URL_)).toBe(URL_);
+    expect(deskUrl(URL_, 'default')).toBe(URL_);
   });
 });
 
@@ -99,6 +118,20 @@ describe('embedDesk', () => {
     expect(on.onEntryCalled).toHaveBeenCalledWith(entry);
     expect(on.onEntryUpdated).toHaveBeenCalledWith(entry);
     expect(on.onMessage).toHaveBeenCalledTimes(5);
+  });
+
+  it('loads the bar layout and passes on the height it asks for', () => {
+    const { win, iframe, dispatch } = fakes();
+    const onResize = vi.fn();
+    const onMessage = vi.fn();
+    embedDesk({ url: URL_, iframe, window: win, layout: 'bar', onResize, onMessage });
+    expect(iframe.src).toBe(`${URL_}&layout=bar`);
+    dispatch({ type: 'klargy:resize', height: 60 });
+    dispatch({ type: 'klargy:resize', height: 248 });
+    dispatch({ type: 'klargy:resize', height: 60 }, 'https://evil.example.com');
+    dispatch({ type: 'klargy:resize', height: -1 });
+    expect(onResize.mock.calls).toEqual([[60], [248]]);
+    expect(onMessage).toHaveBeenCalledWith({ type: 'klargy:resize', height: 248 });
   });
 
   it('ignores messages from another origin, another window, or malformed ones', () => {

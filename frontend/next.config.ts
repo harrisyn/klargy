@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   reactStrictMode: true,
   poweredByHeader: false,
+  // AGENTS.md and CLAUDE.md are tracked here; stop `next dev` from
+  // (re)writing them on every start.
+  agentRules: false,
   outputFileTracingRoot: path.join(__dirname),
   // Server-only packages that must stay as Node requires rather than being
   // bundled (native bindings / dynamic requires).

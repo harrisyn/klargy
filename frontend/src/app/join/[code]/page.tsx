@@ -17,6 +17,8 @@ interface IdentityFieldConfig {
 }
 
 interface LocationInfo {
+  /** First point of contact: with one set, people start there without choosing. */
+  defaultServiceId?: string | null;
   id: string;
   name: string;
   publicCode: string;
@@ -68,6 +70,13 @@ type PageMode = 'normal' | 'kiosk' | 'session';
 
 // Session storage key prefix
 const SESSION_KEY_PREFIX = 'qms_session_';
+
+/** Where someone starts without choosing: the only service, or the
+ * location's first point of contact. */
+function firstStop(loc: LocationInfo): string | null {
+  if (loc.services.length === 1) return loc.services[0].id;
+  return loc.defaultServiceId && loc.services.some((s) => s.id === loc.defaultServiceId) ? loc.defaultServiceId : null;
+}
 
 export default function JoinQueuePage({ params }: { params: Promise<{ code: string }> }) {
   const resolvedParams = use(params);
@@ -173,8 +182,9 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
       countdownRef.current = null;
     }
     const loc = locationRef.current;
-    if (loc?.services.length === 1) {
-      setSelectedServiceId(loc.services[0].id);
+    const start = loc ? firstStop(loc) : null;
+    if (start) {
+      setSelectedServiceId(start);
       setStep('form');
     } else {
       setSelectedServiceId('');
@@ -195,9 +205,8 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
       const data: LocationInfo = await res.json();
       setLocation(data);
       
-      if (data.services.length === 1) {
-        setSelectedServiceId(data.services[0].id);
-      }
+      const start = firstStop(data);
+      if (start) setSelectedServiceId(start);
       
       // In session mode, check if we have existing tickets
       if (mode === 'session' && sessionId) {
@@ -213,8 +222,9 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
         }
       }
       
-      // One service: nothing to choose, go straight to the details.
-      setStep(data.services.length === 1 ? 'form' : 'select-service');
+      // One service, or a first point of contact (Reception): nothing to
+      // choose, go straight to the details.
+      setStep(start ? 'form' : 'select-service');
     } catch (err) {
       console.error('Failed to load location info', err);
       setError(err instanceof Error ? err.message : 'Queue not found or no longer active');

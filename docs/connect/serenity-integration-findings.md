@@ -181,3 +181,35 @@ Klargy (local database):
 
 Suggested clean-up: unsubscribe the plugin (or rotate the sandbox key), end the visit, cancel the test
 appointment, and delete the sandbox workspace when finished.
+
+## 6. Fixed
+
+Klargy (branch `claude/project-thread-mj02be`):
+
+- **K1:** links (desk launch, `statusUrl`, emails) are built by `appUrl()`. With `APP_URL` set it is used as
+  before. In development without it, Klargy uses the protocol and root host of the requests it serves (so
+  `npm run dev` on :3000 links to `<slug>.localhost:3000`). In production the app refuses to start without
+  `APP_URL`, with a message saying what to set. `docker-compose.yml` now passes `APP_URL` through from `.env`.
+- **K2:** error responses never carry a stack trace in any environment (it stays in the server log).
+  `MASTER_ENCRYPTION_KEY` falls back to the docker-compose development default outside production (with a
+  one-time warning); production still refuses, with a message on how to generate and keep the key.
+- **K3:** new repo-root `.env.example` with `APP_URL`, `APP_DOMAIN` and `MASTER_ENCRYPTION_KEY` (and the other
+  compose settings); `frontend/.env.example` explains the local values.
+- **K4:** "Running both on one machine" in [guide.md section 10](./guide.md#10-testing-in-the-sandbox) and
+  `docs/DEPLOYMENT.md` separate the API address (`host.docker.internal`, ignored by the key check) from the
+  workspace address (`<slug>.<APP_DOMAIN>`, what browsers open).
+- **K5:** `agentRules: false` in `frontend/next.config.ts` (supported by Next 16.3), so `next dev` no longer
+  rewrites the tracked `AGENTS.md` and `CLAUDE.md`.
+
+Serenity (to be filled in by the Serenity changes):
+
+- **S1:** Queue tasks run on their own `queue-management` Celery queue with a dedicated worker; the worker checks at start-up that they are registered; every run is recorded with its outcome, and organisation admins are alerted after 5 failures in a row. "Send to…", call, hold and resume return a `job_id` with `GET /v2/queue-management/jobs/{id}`.
+- **S2:** A `reconcile-queue-entries` beat task (every 5 minutes) walks `GET /entries` from a stored cursor and applies the webhook handlers, deduplicated.
+- **S3:** Registration stores the embed origins it sends (including the origin that clicked Register); the setup tab has an embed-origins field and shows what is registered.
+- **S4:** Webhook and lookup URLs come from a new `PUBLIC_API_URL` setting (falls back to `SERVER_HOST`), admins can override it, and the setup tab shows the registered URLs and time.
+- **S5:** The called-patient notice uses the app's toast helper, with a unit test.
+- **S6:** Only active clinics at live locations and active practitioners are published; clinics sharing a name get the location added.
+- **S7:** Plugin description and version updated (1.6.0) by an idempotent migration.
+- **S8:** Setup shows "Registered with Klargy" and "Registered by this organisation" separately and refreshes after Register.
+- **S9:** Every delivery is recorded as processed or ignored with a reason; echoes of Serenity's own actions are ignored; `ticket_stored: false` now says why.
+- **S10:** Send to shows a success or failure toast from the job outcome.
