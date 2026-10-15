@@ -6,6 +6,8 @@ import React, { useState, useEffect, useCallback, useRef, use } from 'react';
 import Link from 'next/link';
 import { useSocket } from '@/hooks/useSocket';
 import { APP_NAME } from '@/lib/appConfig';
+import { useRouter } from 'next/navigation';
+import { DoneHere, JourneyTrail, SentToCard, type JourneyStop, type SentTo } from './JourneyPanel';
 
 interface QueueStatus {
   ticketNumber: string;
@@ -15,6 +17,14 @@ interface QueueStatus {
   locationName: string;
   locationAddress: string | null;
   status: 'WAITING' | 'SERVING' | 'SERVED' | 'CANCELLED' | 'NO_SHOW';
+  /** On hold: off the desk for now, called back by staff. */
+  held?: boolean;
+  /** Waiting for payment before they can be called. */
+  awaitingClearance?: boolean;
+  /** The ticket they were sent on to, if any. */
+  sentTo?: SentTo | null;
+  /** The visit so far, oldest first. */
+  journey?: JourneyStop[];
   /** Today's queue: PAUSED while staff (or the EMR) have paused it. */
   queueStatus?: 'ACTIVE' | 'PAUSED' | 'CLOSED';
   currentlyServing: string | null;
@@ -70,6 +80,7 @@ export default function QueueStatusPage({
   const [identityError, setIdentityError] = useState<string | null>(null);
   
   const { joinQueue, leaveQueue, onQueueUpdated, onEntryStatusChanged, onNotification } = useSocket();
+  const router = useRouter();
 
   // Play alert sound
   const playAlertSound = useCallback(() => {
@@ -434,6 +445,18 @@ export default function QueueStatusPage({
             </div>
           </div>
 
+          {/* On hold / awaiting payment */}
+          {status.status === 'WAITING' && status.held && (
+            <div role="status" style={pausedBanner}>
+              You&apos;re on hold for now. Please stay nearby; staff will call you back.
+            </div>
+          )}
+          {status.status === 'WAITING' && !status.held && status.awaitingClearance && (
+            <div role="status" style={pausedBanner}>
+              Awaiting payment. Please pay at the cashier; you&apos;ll join the line for {status.serviceName} as soon as it&apos;s cleared.
+            </div>
+          )}
+
           {/* Paused banner */}
           {status.status === 'WAITING' && status.queueStatus === 'PAUSED' && (
             <div role="status" style={pausedBanner}>
@@ -675,6 +698,19 @@ export default function QueueStatusPage({
             </div>
           )}
         </div>
+
+        {/* Sent on, I'm done here, and the visit so far */}
+        {status.sentTo && <SentToCard sentTo={status.sentTo} brandColor={brandColor} />}
+        {!status.sentTo && (
+          <DoneHere
+            queueId={queueId}
+            entryId={entryId}
+            status={status.status}
+            brandColor={brandColor}
+            onMoved={(to) => (to ? router.push(to.statusPath) : loadStatus())}
+          />
+        )}
+        {status.journey && <JourneyTrail journey={status.journey} brandColor={brandColor} />}
 
         {/* Notifications */}
         {status.status === 'WAITING' && !notificationsEnabled && (

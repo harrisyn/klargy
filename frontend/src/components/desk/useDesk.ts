@@ -99,7 +99,8 @@ function errorText(err: unknown, fallback: string) {
 
 /** What the practitioner just did to an entry, for a host app (Klargy
  * Connect): `called` when they called someone, `updated` when an entry was
- * served, sent on, cancelled or marked as not here. */
+ * served, sent on, cancelled, marked as not here, put on hold or called back
+ * from hold. */
 export type DeskEntryEvent = 'called' | 'updated';
 
 export interface UseDeskOptions {
@@ -273,9 +274,12 @@ export function useDesk(options: UseDeskOptions = {}) {
   const callNext = useCallback((entryId?: string) => run('call', async () => {
     if (!queueId || !desk) return;
     setAfterComplete(null);
+    // Calling back someone on hold is a resume: the host hears entry-updated
+    // (as for the hold), not a new call.
+    const wasHeld = !!entryId && !!data?.waiting.find((e) => e.id === entryId)?.heldAt;
     const called = await api.callNextWithServicePoint(queueId, desk.instanceId, entryId);
-    report('called', called?.id);
-  }), [run, queueId, desk, report]);
+    report(wasHeld ? 'updated' : 'called', called?.id);
+  }), [run, queueId, desk, report, data]);
 
   const recall = useCallback(() => run('recall', async () => {
     if (!queueId || !current) return;

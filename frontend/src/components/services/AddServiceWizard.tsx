@@ -128,6 +128,10 @@ export const AddServiceWizard: React.FC<AddServiceWizardProps> = ({ organization
                   <input type="checkbox" checked={data.allowAnonymous} onChange={e => update('allowAnonymous', e.target.checked)} />
                   Allow anonymous ticket (no info required)
                 </label>
+                <label>
+                  <input type="checkbox" checked={data.requiresClearance} onChange={e => update('requiresClearance', e.target.checked)} />
+                  Wait for payment before they can be called
+                </label>
               </div>
             </div>
           )}
