@@ -17,7 +17,7 @@ vi.mock('../lib/prisma', () => ({
     externalReference: { findMany: vi.fn() },
   },
 }));
-vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
+vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false }, notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
 vi.mock('../lib/realtime', () => ({ emitToQueue: vi.fn(), emitToLocation: vi.fn(), SOCKET_EVENTS: {} }));
 
 import prisma from '../lib/prisma';
@@ -90,7 +90,7 @@ describe('recordQueueEvent', () => {
       expect(payload.data.statusUrl).toMatch(/^https?:\/\/nyaho\.[^/]+\/status\/q1\/e1$/);
       expect(payload.data.position).toBe(3);
     }
-    expect((prisma.queueEntry.findMany as any).mock.calls[0][0].where).toEqual({ queueId: 'q1', status: 'WAITING' });
+    expect((prisma.queueEntry.findMany as any).mock.calls[0][0].where).toEqual({ queueId: 'q1', status: 'WAITING', heldAt: null, awaitingClearance: false });
   });
 
   it('sends origin, servicePoint and the integration’s refs, with the actor as staff', async () => {

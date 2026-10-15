@@ -361,7 +361,7 @@ class ApiClient {
     return data;
   }
 
-  async updateLocation(id: string, payload: { name?: string; address?: string; timezone?: string; publicCode?: string | null; externalReference?: string | null }) {
+  async updateLocation(id: string, payload: { name?: string; address?: string; timezone?: string; publicCode?: string | null; externalReference?: string | null; defaultServiceId?: string | null }) {
     const { data } = await this.client.put(`/locations/${id}`, payload);
     return data;
   }
@@ -989,6 +989,34 @@ class ApiClient {
 
   async recallEntry(queueId: string, entryId: string) {
     const { data } = await this.client.post(`/queues/${queueId}/entry/${entryId}/recall`);
+    return data;
+  }
+
+  /** Put the person being served on hold (the desk is free for the next one). */
+  async holdEntry(queueId: string, entryId: string): Promise<{ changed: boolean }> {
+    const { data } = await this.client.post(`/queues/${queueId}/entry/${entryId}/hold`);
+    return data;
+  }
+
+  /** Call someone on hold back, to this desk (or the one they were held at). */
+  async resumeEntry(queueId: string, entryId: string, servicePointInstanceId?: string): Promise<{ changed: boolean }> {
+    const { data } = await this.client.post(`/queues/${queueId}/entry/${entryId}/resume`, { servicePointInstanceId });
+    return data;
+  }
+
+  /** Mark someone waiting for payment as paid, so they can be called. */
+  async clearEntry(queueId: string, entryId: string): Promise<{ changed: boolean }> {
+    const { data } = await this.client.post(`/queues/${queueId}/entry/${entryId}/clear`);
+    return data;
+  }
+
+  async getFlowTemplates(): Promise<{ id: string; name: string; description: string; services: { name: string; requiresClearance: boolean }[]; flows: Record<string, string[]>; defaultService: string }[]> {
+    const { data } = await this.client.get('/service-flows/templates');
+    return data;
+  }
+
+  async applyFlowTemplate(templateId: string, locationId: string): Promise<{ services: { id: string; name: string; created: boolean }[]; servicePointsCreated: number; flowsCreated: number; defaultServiceId: string }> {
+    const { data } = await this.client.post(`/service-flows/templates/${templateId}/apply`, { locationId });
     return data;
   }
 

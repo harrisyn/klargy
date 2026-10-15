@@ -19,6 +19,7 @@ export const createService = async (req: Request, res: Response, next: NextFunct
       allowAnonymous,
       displayMode,
       isActive,
+      requiresClearance,
       locationIds,
       servicePoints,
     } = req.body;
@@ -98,6 +99,7 @@ export const createService = async (req: Request, res: Response, next: NextFunct
             allowAnonymous: allowAnonymous ?? false,
             displayMode: displayMode || null,
             isActive: isActive ?? true,
+            requiresClearance: requiresClearance === true,
           },
         });
 
@@ -212,7 +214,7 @@ export const updateService = async (req: Request, res: Response, next: NextFunct
     // caller repoint locationId at another org's location.
     const UPDATABLE = [
       'name', 'description', 'type', 'slotDuration', 'concurrentLimit', 'activeDays', 'startTime',
-      'endTime', 'requiresName', 'requiresPhone', 'allowAnonymous', 'displayMode', 'isActive',
+      'endTime', 'requiresName', 'requiresPhone', 'allowAnonymous', 'displayMode', 'isActive', 'requiresClearance',
     ];
     const updates: Record<string, unknown> = {};
     for (const key of UPDATABLE) {

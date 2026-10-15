@@ -2,7 +2,7 @@ import prisma from '../lib/prisma';
 import { emitToQueue, emitToLocation, emitToQueueAndLocation, SOCKET_EVENTS } from '../lib/realtime';
 import { generateTicketNumber, getNextSequence } from '../utils/ticket';
 import { checkLimit } from '../middleware/subscription.middleware';
-import { WAITING_ORDER, computePosition } from './notifications.service';
+import { CALLABLE_WHERE, WAITING_ORDER, computePosition } from './notifications.service';
 import {
   recordQueueEvent,
   startJourney,
@@ -27,7 +27,8 @@ export type ActionErrorCode =
   | 'ALREADY_IN_QUEUE'
   | 'INVALID_SERVICE_POINT'
   | 'NOT_WAITING'
-  | 'INVALID_TRANSITION';
+  | 'INVALID_TRANSITION'
+  | 'AWAITING_CLEARANCE';
 
 /** A refusal; `body` is exactly what the staff API has always sent. */
 export class QueueActionError extends Error {
@@ -90,7 +91,14 @@ export async function checkEntryLimits(organizationId: string) {
 
 export async function joinQueueEntry(
   queueId: string,
-  input: { userId: string; priority?: number; notes?: string | null; journeyId?: string | null },
+  input: {
+    userId: string;
+    priority?: number;
+    notes?: string | null;
+    journeyId?: string | null;
+    /** Payment already settled: skip the service's clearance gate. */
+    cleared?: boolean;
+  },
   ctx: ActionContext = {},
   hooks: { beforeEvent?: (entryId: string) => Promise<void> } = {}
 ) {
@@ -121,6 +129,7 @@ export async function joinQueueEntry(
       ticketNumber,
       priority: priority || 0,
       notes,
+      awaitingClearance: !!queue.service.requiresClearance && !input.cleared,
       ...(input.journeyId ? { journeyId: input.journeyId } : {}),
     },
     include: {
@@ -136,8 +145,8 @@ export async function joinQueueEntry(
     });
   }
 
-  // Position in the same order staff call people
-  const position = Math.max(0, (await computePosition(queueId, entry.id)) - 1) + 1;
+  // Position in the same order staff call people (none while awaiting payment)
+  const position = entry.awaitingClearance ? null : Math.max(0, (await computePosition(queueId, entry.id)) - 1) + 1;
 
   const updateData = { queueId, action: 'joined', entry: { ...entry, position } };
   emitToQueue(queueId, SOCKET_EVENTS.QUEUE_UPDATED, updateData);
@@ -187,25 +196,53 @@ export async function callEntry(
   }
 
   const requestedEntryId = input.entryId ? String(input.entryId) : null;
-  let claimedId: string | null = null;
-  for (let attempt = 0; attempt < 5 && !claimedId; attempt++) {
-    const candidate = await prisma.queueEntry.findFirst({
-      where: { queueId, status: 'WAITING', ...(requestedEntryId ? { id: requestedEntryId } : {}) },
-      orderBy: WAITING_ORDER,
-      select: { id: true, joinedAt: true },
+  if (requestedEntryId) {
+    // A chosen patient may be on hold (calling them resumes them), but not
+    // one still waiting for payment.
+    const chosen = await prisma.queueEntry.findFirst({
+      where: { id: requestedEntryId, queueId, status: 'WAITING' },
+      select: { awaitingClearance: true },
     });
+    if (chosen?.awaitingClearance) {
+      throw new QueueActionError(409, 'AWAITING_CLEARANCE', { error: 'They can’t be called until their payment is cleared.', code: 'AWAITING_CLEARANCE' });
+    }
+  }
+  const reservedElsewhere = requestedEntryId ? [] : await entriesReservedForOtherDesks(queueId, servicePointInstanceId || null);
+  let claimedId: string | null = null;
+  let wasHeld = false;
+  for (let attempt = 0; attempt < 5 && !claimedId; attempt++) {
+    const select = { id: true, joinedAt: true, calledAt: true, heldAt: true };
+    const candidate = requestedEntryId
+      ? await prisma.queueEntry.findFirst({ where: { id: requestedEntryId, queueId, status: 'WAITING', awaitingClearance: false }, select })
+      : // Someone returning to this desk goes first, then the line.
+        ((servicePointInstanceId
+          ? await prisma.queueEntry.findFirst({
+              where: { queueId, ...CALLABLE_WHERE, deskInstanceId: servicePointInstanceId },
+              orderBy: WAITING_ORDER,
+              select,
+            })
+          : null) ??
+        (await prisma.queueEntry.findFirst({
+          where: { queueId, ...CALLABLE_WHERE, ...(reservedElsewhere.length ? { id: { notIn: reservedElsewhere } } : {}) },
+          orderBy: WAITING_ORDER,
+          select,
+        })));
     if (!candidate) break;
     const claimed = await prisma.queueEntry.updateMany({
-      where: { id: candidate.id, status: 'WAITING' },
+      where: { id: candidate.id, status: 'WAITING', awaitingClearance: false },
       data: {
         status: 'SERVING',
-        calledAt: new Date(),
-        waitDuration: minutesSince(candidate.joinedAt),
+        // A resumed entry keeps its first call time and wait.
+        ...(candidate.heldAt && candidate.calledAt ? {} : { calledAt: new Date(), waitDuration: minutesSince(candidate.joinedAt) }),
         servicePointInstanceId: servicePointInstanceId || null,
+        heldAt: null,
+        deskInstanceId: null,
       },
     });
-    if (claimed.count === 1) claimedId = candidate.id;
-    else if (requestedEntryId) break;
+    if (claimed.count === 1) {
+      claimedId = candidate.id;
+      wasHeld = !!candidate.heldAt;
+    } else if (requestedEntryId) break;
   }
 
   if (!claimedId) {
@@ -235,23 +272,136 @@ export async function callEntry(
   });
 
   await recordQueueEvent({
-    action: 'entry.called',
+    action: wasHeld ? 'entry.resumed' : 'entry.called',
     actorUserId: ctx.actorUserId,
     origin: ctx.origin,
     queueId,
     entryId: entry.id,
-    data: { servicePointId: servicePoint?.id ?? null, servicePointInstanceId: servicePointInstanceId || null },
+    data: { ...(ctx.data ?? {}), servicePointId: servicePoint?.id ?? null, servicePointInstanceId: servicePointInstanceId || null },
   });
   await afterEntryCalled(
     entry.id,
     entry.servicePointInstance?.displayName ||
       (servicePoint
         ? [servicePoint.displayName || servicePoint.name, entry.servicePointInstance?.instanceNumber].filter(Boolean).join(' ')
-        : null)
+        : null),
+    // Called back after a hold: tell them again.
+    wasHeld ? new Date(Date.now() - 1000) : undefined
   );
   await afterQueueChange(queueId);
 
-  return { entry, servicePoint };
+  return { entry, servicePoint, resumed: wasHeld };
+}
+
+/** Waiting entries that belong with another desk someone is signed in to
+ * (put on hold there, or returning to it): call next elsewhere skips them. */
+async function entriesReservedForOtherDesks(queueId: string, deskId: string | null): Promise<string[]> {
+  const reserved = await prisma.queueEntry.findMany({
+    where: { queueId, ...CALLABLE_WHERE, deskInstanceId: { not: null } },
+    select: { id: true, deskInstanceId: true },
+  });
+  const others = (reserved ?? []).filter((r) => r.deskInstanceId !== deskId);
+  if (others.length === 0) return [];
+  const occupied = await prisma.servicePointInstance.findMany({
+    where: { id: { in: [...new Set(others.map((r) => r.deskInstanceId!))] }, isOccupied: true, isActive: true },
+    select: { id: true },
+  });
+  const taken = new Set((occupied ?? []).map((d) => d.id));
+  return others.filter((r) => taken.has(r.deskInstanceId!)).map((r) => r.id);
+}
+
+// ---------------------------------------------------------------------------
+// Hold and clearance
+// ---------------------------------------------------------------------------
+
+/**
+ * Puts the person being served on hold: they leave the desk (which is free
+ * for the next person), stay at the front of the line, and aren't picked by
+ * call next. Calling them (resume, or call a chosen patient) brings them
+ * back; by default to the same desk. Returns whether anything changed.
+ */
+export async function holdEntry(entryId: string, ctx: ActionContext = {}): Promise<{ changed: boolean }> {
+  const entry = await prisma.queueEntry.findUnique({
+    where: { id: entryId },
+    select: { id: true, queueId: true, status: true, heldAt: true, servicePointInstanceId: true },
+  });
+  if (!entry) throw new QueueActionError(404, 'NOT_FOUND', { error: 'Entry not found' });
+  if (entry.status === 'WAITING' && entry.heldAt) return { changed: false };
+  if (entry.status !== 'SERVING') {
+    throw new QueueActionError(409, 'INVALID_TRANSITION', { error: 'Only someone being served can be put on hold.' });
+  }
+  const held = await prisma.queueEntry.updateMany({
+    where: { id: entryId, status: 'SERVING' },
+    data: { status: 'WAITING', heldAt: new Date(), deskInstanceId: entry.servicePointInstanceId, servicePointInstanceId: null },
+  });
+  if (held.count !== 1) {
+    throw new QueueActionError(409, 'INVALID_TRANSITION', { error: 'The entry changed status before this could be applied' });
+  }
+  const locationId = await getLocationIdFromQueue(entry.queueId);
+  emitToQueueAndLocation(entry.queueId, locationId, SOCKET_EVENTS.ENTRY_STATUS_CHANGED, {
+    queueId: entry.queueId, entryId, status: 'WAITING', action: 'held',
+  });
+  await recordQueueEvent({
+    action: 'entry.held',
+    actorUserId: ctx.actorUserId,
+    origin: ctx.origin,
+    queueId: entry.queueId,
+    entryId,
+    data: { ...(ctx.data ?? {}), servicePointInstanceId: entry.servicePointInstanceId },
+  });
+  await afterQueueChange(entry.queueId);
+  return { changed: true };
+}
+
+/** Calls a held entry back: to `servicePointInstanceId` when given, else
+ * the desk it was held at (if that desk is still open for the service). */
+export async function resumeEntry(entryId: string, input: { servicePointInstanceId?: string | null }, ctx: ActionContext = {}) {
+  const entry = await prisma.queueEntry.findUnique({
+    where: { id: entryId },
+    select: { id: true, queueId: true, status: true, heldAt: true, deskInstanceId: true },
+  });
+  if (!entry) throw new QueueActionError(404, 'NOT_FOUND', { error: 'Entry not found' });
+  if (entry.status === 'SERVING') return { changed: false };
+  if (entry.status !== 'WAITING' || !entry.heldAt) {
+    throw new QueueActionError(409, 'INVALID_TRANSITION', { error: 'Only someone on hold can be resumed.' });
+  }
+  let desk = input.servicePointInstanceId ?? null;
+  if (!desk && entry.deskInstanceId) {
+    const held = await prisma.servicePointInstance.findUnique({ where: { id: entry.deskInstanceId }, select: { isActive: true } });
+    desk = held?.isActive ? entry.deskInstanceId : null;
+  }
+  try {
+    await callEntry(entry.queueId, { entryId, servicePointInstanceId: desk }, ctx);
+  } catch (error) {
+    // The old desk no longer serves this service: call them without one.
+    if (!(error instanceof QueueActionError) || error.code !== 'INVALID_SERVICE_POINT' || input.servicePointInstanceId) throw error;
+    await callEntry(entry.queueId, { entryId, servicePointInstanceId: null }, ctx);
+  }
+  return { changed: true };
+}
+
+/**
+ * Clears the payment gate: the entry joins the line (by when they arrived)
+ * and can be called. Returns whether anything changed.
+ */
+export async function clearEntry(entryId: string, ctx: ActionContext = {}): Promise<{ changed: boolean }> {
+  const entry = await prisma.queueEntry.findUnique({ where: { id: entryId }, select: { id: true, queueId: true, awaitingClearance: true } });
+  if (!entry) throw new QueueActionError(404, 'NOT_FOUND', { error: 'Entry not found' });
+  if (!entry.awaitingClearance) return { changed: false };
+  const cleared = await prisma.queueEntry.updateMany({ where: { id: entryId, awaitingClearance: true }, data: { awaitingClearance: false } });
+  if (cleared.count !== 1) return { changed: false };
+  const locationId = await getLocationIdFromQueue(entry.queueId);
+  emitToQueueAndLocation(entry.queueId, locationId, SOCKET_EVENTS.QUEUE_UPDATED, { queueId: entry.queueId, entryId, action: 'cleared' });
+  await recordQueueEvent({
+    action: 'entry.cleared',
+    actorUserId: ctx.actorUserId,
+    origin: ctx.origin,
+    queueId: entry.queueId,
+    entryId,
+    data: ctx.data,
+  });
+  await afterQueueChange(entry.queueId);
+  return { changed: true };
 }
 
 // ---------------------------------------------------------------------------

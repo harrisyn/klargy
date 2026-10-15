@@ -43,11 +43,15 @@ vi.mock('../../services/queueActions.service', async () => {
     endEntry: vi.fn(),
     checkEntryLimits: vi.fn(),
     setEntryPriority: vi.fn(),
+    holdEntry: vi.fn(),
+    resumeEntry: vi.fn(),
+    clearEntry: vi.fn(),
   };
 });
 
 vi.mock('../../services/notifications.service', () => ({
   WAITING_ORDER: [],
+  CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false },
   notifyEntry: vi.fn().mockResolvedValue(undefined),
   notifyPositions: vi.fn(),
 }));
@@ -158,7 +162,7 @@ beforeEach(() => {
   (prisma.customerJourney.findUnique as any).mockResolvedValue(null);
   (prisma.queueEntry.findFirst as any).mockResolvedValue(null);
   (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
-    where.queueId && where.status === 'WAITING' ? [{ id: 'e0' }, { id: 'e1' }] : (where.id?.in ?? []).map((id: string) => entryRow(id))
+    where.OR ? [] : where.queueId && where.status === 'WAITING' ? [{ id: 'e0' }, { id: 'e1' }] : (where.id?.in ?? []).map((id: string) => entryRow(id))
   );
   (getOrCreateQueueForDate as any).mockResolvedValue({ queue: { id: 'q1', status: 'ACTIVE' } });
   (joinQueueEntry as any).mockImplementation(async (_q: string, _input: unknown, _ctx: unknown, hooks: any) => {
@@ -199,7 +203,7 @@ describe('POST /entries', () => {
 
   it('gives no place in line once the entry is being served', async () => {
     (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
-      where.status ? [] : where.id.in.map((id: string) => entryRow(id, 'SERVING'))
+      where.OR ? [] : where.status ? [] : where.id.in.map((id: string) => entryRow(id, 'SERVING'))
     );
     const res = makeRes();
     await postEntry(makeReq({ body }), res, vi.fn());
@@ -355,7 +359,7 @@ describe('POST /entries/by-ref', () => {
     refs.push({ resourceType: 'visit', resourceId: 'j1', externalId: 'V1' });
     (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1', 'e2'] });
     (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
-      where.status ? [{ id: 'e1' }, { id: 'e2' }] : where.id.in.map((id: string) => entryRow(id))
+      where.OR ? [] : where.status ? [{ id: 'e1' }, { id: 'e2' }] : where.id.in.map((id: string) => entryRow(id))
     );
     (prisma.queueEntry.findFirst as any).mockImplementation(async ({ where }: any) => ({
       id: where.id, status: where.id === 'e2' ? 'SERVING' : 'WAITING', queueId: 'q1', queue: { serviceId: 's1' },
@@ -419,7 +423,7 @@ describe('GET /entries/by-ref', () => {
     refs.push({ resourceType: 'visit', resourceId: 'j1', externalId: 'V1' });
     (prisma.customerJourney.findUnique as any).mockResolvedValue({ id: 'j1', userId: 'u1', queueEntryIds: ['e1', 'e2'] });
     (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) =>
-      where.status?.in ? [{ id: 'e1' }, { id: 'e2' }] : where.queueId ? [] : where.id.in.map((id: string) => entryRow(id, id === 'e2' ? 'SERVING' : 'WAITING'))
+      where.OR ? [] : where.status?.in ? [{ id: 'e1' }, { id: 'e2' }] : where.queueId ? [] : where.id.in.map((id: string) => entryRow(id, id === 'e2' ? 'SERVING' : 'WAITING'))
     );
     (prisma.queueEntry.findFirst as any).mockImplementation(async ({ where }: any) => ({
       id: where.id, status: where.id === 'e2' ? 'SERVING' : 'WAITING', queueId: 'q1', queue: { serviceId: 's1' },
@@ -456,7 +460,7 @@ describe('GET /entries', () => {
   it('lists entries changed since, oldest first, scoped to the organisation', async () => {
     const t = (m: number) => new Date(Date.UTC(2026, 9, 14, 9, m));
     (prisma.queueEntry.findMany as any).mockImplementation(async (args: any) =>
-      args.select ? [{ id: 'e1', updatedAt: t(1) }, { id: 'e2', updatedAt: t(2) }] : args.where.id.in.map((id: string) => entryRow(id))
+      args.where.OR ? [] : args.select ? [{ id: 'e1', updatedAt: t(1) }, { id: 'e2', updatedAt: t(2) }] : args.where.id.in.map((id: string) => entryRow(id))
     );
     const res = makeRes();
     await listEntries(makeReq({ method: 'GET', query: { updatedSince: t(0).toISOString() } }), res, vi.fn());
@@ -517,7 +521,7 @@ describe('phase 5: by-ref service selector, transfer and priority', () => {
     const svc: Record<string, string> = { e1: 's1', e2: 's2', e3: 's2' };
     const st: Record<string, string> = { e1: 'WAITING', e2: 'SERVING', e3: 'WAITING' };
     (prisma.queueEntry.findMany as any).mockImplementation(async ({ where }: any) => {
-      if (where.queueId) return [];
+      if (where.queueId || where.OR) return [];
       if (where.status?.in) {
         return where.id.in.filter((id: string) => !where.queue || svc[id] === where.queue.serviceId).map((id: string) => ({ id }));
       }

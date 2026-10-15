@@ -38,7 +38,7 @@ vi.mock('../../services/queueEvents.service', () => ({
 }));
 
 vi.mock('../../services/notifications.service', () => ({
-  WAITING_ORDER: [],
+  WAITING_ORDER: [], CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false },
   computePosition: vi.fn(async () => 1),
   notifyEntry: vi.fn(async () => {}),
 }));

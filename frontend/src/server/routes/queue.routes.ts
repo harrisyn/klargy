@@ -18,6 +18,9 @@ import {
   getQueueEntriesForOperator,
   completeWithNextSuggestions,
   transferEntry,
+  holdQueueEntry,
+  resumeQueueEntry,
+  clearQueueEntry,
 } from '../controllers/queue.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { scope, queue, entry, service, user, instance, each } from '../middleware/tenantScope.middleware';
@@ -45,6 +48,9 @@ router.post('/:id/entry/:entryId/recall', authorize('SERVICE_STAFF', 'LOCATION_A
 router.patch('/:id/entry/:entryId/complete', authorize('SERVICE_STAFF', 'LOCATION_ADMIN', 'ORG_ADMIN', 'SUPER_ADMIN', 'RECEPTIONIST'), scope(q, e), completeWithNextSuggestions);
 router.patch('/:id/entry/:entryId/cancel', scope(q, e), cancelEntry);
 router.patch('/:id/entry/:entryId/no-show', authorize('SERVICE_STAFF', 'LOCATION_ADMIN', 'ORG_ADMIN', 'SUPER_ADMIN'), scope(q, e), markNoShow);
+router.post('/:id/entry/:entryId/hold', authorize('SERVICE_STAFF', 'RECEPTIONIST', 'LOCATION_ADMIN', 'ORG_ADMIN', 'SUPER_ADMIN'), scope(q, e), holdQueueEntry);
+router.post('/:id/entry/:entryId/resume', authorize('SERVICE_STAFF', 'RECEPTIONIST', 'LOCATION_ADMIN', 'ORG_ADMIN', 'SUPER_ADMIN'), scope(q, e, instance('body.servicePointInstanceId')), resumeQueueEntry);
+router.post('/:id/entry/:entryId/clear', authorize('SERVICE_STAFF', 'RECEPTIONIST', 'LOCATION_ADMIN', 'ORG_ADMIN', 'SUPER_ADMIN'), scope(q, e), clearQueueEntry);
 router.post('/:id/entry/:entryId/transfer', authorize('SERVICE_STAFF', 'RECEPTIONIST', 'LOCATION_ADMIN', 'ORG_ADMIN', 'SUPER_ADMIN'), scope(q, e, service('body.serviceId')), transferEntry);
 router.patch('/:id/move', authorize('SERVICE_STAFF', 'RECEPTIONIST', 'LOCATION_ADMIN', 'ORG_ADMIN', 'SUPER_ADMIN'), scope(q, entry('body.entryId'), queue('body.targetQueueId')), moveEntry);
 

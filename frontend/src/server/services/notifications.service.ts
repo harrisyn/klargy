@@ -39,6 +39,10 @@ export const WAITING_ORDER = [
   { joinedAt: 'asc' as const },
 ];
 
+// Who "Call next" can pick, and who has a place in line: waiting, not on
+// hold, and not waiting for payment (a service that requires clearance).
+export const CALLABLE_WHERE = { status: 'WAITING' as const, heldAt: null, awaitingClearance: false };
+
 // Walk-in patients get a synthetic guest address - never email those.
 const isRealEmail = (email: string) => !email.endsWith('@guest.qms.local');
 
@@ -177,7 +181,7 @@ export async function notifyPositions(queueId: string): Promise<void> {
   const { turnApproachingAt } = readNotificationSettings(queue.service.location.organization.notificationSettings);
 
   const waiting = await prisma.queueEntry.findMany({
-    where: { queueId, status: 'WAITING' },
+    where: { queueId, ...CALLABLE_WHERE },
     orderBy: WAITING_ORDER,
     take: turnApproachingAt,
     select: { id: true },
@@ -187,10 +191,11 @@ export async function notifyPositions(queueId: string): Promise<void> {
   }
 }
 
-/** 1-based position of a waiting entry in the same order staff call people. */
+/** 1-based position of a waiting entry in the same order staff call people
+ * (0 when it has no place: on hold, waiting for payment, or not waiting). */
 export async function computePosition(queueId: string, entryId: string): Promise<number> {
   const waiting = await prisma.queueEntry.findMany({
-    where: { queueId, status: 'WAITING' },
+    where: { queueId, ...CALLABLE_WHERE },
     orderBy: WAITING_ORDER,
     select: { id: true },
   });
