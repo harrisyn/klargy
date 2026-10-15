@@ -8,7 +8,7 @@ export default function QrCode({ value, size = 160, className, label }: { value:
   const [svg, setSvg] = useState('');
   useEffect(() => {
     let cancelled = false;
-    QRCode.toString(value, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#1c2733', light: '#ffffff' } })
+    QRCode.toString(value, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#0d2a47', light: '#ffffff' } })
       .then((s) => { if (!cancelled) setSvg(s); })
       .catch(() => setSvg(''));
     return () => { cancelled = true; };
@@ -27,5 +27,5 @@ export default function QrCode({ value, size = 160, className, label }: { value:
 
 /** PNG data URL for downloads. */
 export function qrPng(value: string, size = 1024) {
-  return QRCode.toDataURL(value, { width: size, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#1c2733', light: '#ffffff' } });
+  return QRCode.toDataURL(value, { width: size, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#0d2a47', light: '#ffffff' } });
 }

@@ -6,18 +6,24 @@
 /* CSS Custom Properties (Design Tokens) */
 :root {
   /* Primary Brand Colors (teal) */
-  /* "Signal teal" - the colour of it-is-your-turn. Deeper and greener than
-     the stock Tailwind teal so it reads as ours. */
-  --primary-50: #eef8f6;
-  --primary-100: #d3eee9;
-  --primary-200: #a6dcd3;
-  --primary-300: #6fc4b7;
-  --primary-400: #37a898;
-  --primary-500: #0e8f80;
-  --primary-600: #0b7a6d;
-  --primary-700: #0a655a;
-  --primary-800: #0b5048;
-  --primary-900: #0b3f39;
+  /* Taken from the Klargy logo: 500 is the logo teal. Text on a filled
+     teal surface uses 600 or darker for contrast. */
+  --primary-50: #edf8f8;
+  --primary-100: #d2eff0;
+  --primary-200: #a5dfe1;
+  --primary-300: #6cc7cb;
+  --primary-400: #33b0b5;
+  --primary-500: #0f9fa4;
+  --primary-600: #0b7f84;
+  --primary-700: #0a676c;
+  --primary-800: #0a565a;
+  --primary-900: #0a4649;
+
+  /* Navy from the logo (the deep blue in the wordmark); used for ink and
+     the ticket gradient. */
+  --navy-500: #004c90;
+  --navy-600: #003d74;
+  --navy-700: #002f5a;
 
   /* Amber accent — reserved for "active/serving now" emphasis only,
      not a general secondary color (queue status, current ticket). */
@@ -61,21 +67,21 @@
   --gray-500: #677483;
   --gray-600: #4b5866;
   --gray-700: #36414d;
-  --gray-800: #26303b;
-  --gray-900: #1c2733;
+  --gray-800: #1d3248;
+  --gray-900: #0d2a47;
 
   /* Surfaces */
-  --paper: #f3f5f2;
-  --ink: #1c2733;
-  --slate: #aebbc7;
+  --paper: #f2f6f5;
+  --ink: #0d2a47;
+  --slate: #9cbab9;
   --coral: #e2674b;
-  --focus-ring: 0 0 0 3px rgba(14, 143, 128, 0.35);
+  --focus-ring: 0 0 0 3px rgba(15, 159, 164, 0.35);
 
   /* Gradients — --gradient-ticket is the ONLY gradient new redesigned
      components may use (reserved for the hero ticket-number display).
      --gradient-hero remains for now; it's removed when the pages that
      still consume it are redesigned in a later phase, not here. */
-  --gradient-ticket: linear-gradient(135deg, #0e8f80 0%, #0b7a6d 50%, #e09f12 100%);
+  --gradient-ticket: linear-gradient(135deg, #0f9fa4 0%, #0b7f84 45%, #004c90 100%);
   --gradient-dark: linear-gradient(135deg, #1f2937 0%, #111827 100%);
   --gradient-hero: linear-gradient(135deg, var(--primary-600) 0%, var(--primary-800) 100%);
   --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -259,13 +265,13 @@ input::placeholder {
 }
 
 .btn-primary {
-  background: var(--primary-500);
+  background: var(--primary-600);
   color: white;
   box-shadow: var(--shadow-sm);
 }
 
 .btn-primary:hover {
-  background: var(--primary-600);
+  background: var(--primary-700);
   box-shadow: var(--shadow-md);
 }
 
@@ -689,7 +695,7 @@ input::placeholder {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  text-shadow: 0 4px 30px rgba(14, 143, 128, 0.3);
+  text-shadow: 0 4px 30px rgba(15, 159, 164, 0.3);
 }
 
 .ticket-number-serving {
@@ -1525,7 +1531,7 @@ input::placeholder {
 .app-nav-item svg { color: #8c9aa8; flex-shrink: 0; }
 .app-nav-item:hover { background: rgba(255, 255, 255, 0.06); color: white; }
 .app-nav-item:hover svg { color: #dbe3ea; }
-.app-nav-item[aria-current="page"] { background: rgba(14, 143, 128, 0.22); color: white; }
+.app-nav-item[aria-current="page"] { background: rgba(15, 159, 164, 0.22); color: white; }
 .app-nav-item[aria-current="page"] svg { color: var(--primary-300); }
 
 .app-user {
@@ -1623,7 +1629,7 @@ input::placeholder {
    ======================================== */
 
 .authx {
-  --authx-accent: var(--primary-500);
+  --authx-accent: var(--primary-600);
   min-height: 100svh;
   display: grid;
   grid-template-columns: minmax(320px, 42%) 1fr;
@@ -1722,7 +1728,7 @@ input::placeholder {
   gap: 0.5rem;
   padding: 0.875rem 1rem;
   border-radius: 10px;
-  background: var(--authx-accent, var(--primary-500));
+  background: var(--authx-accent, var(--primary-600));
   color: white;
   font-weight: 600;
   font-size: 1rem;

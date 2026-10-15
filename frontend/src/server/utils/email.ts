@@ -117,7 +117,7 @@ export const emailLayout = (heading: string, bodyHtml: string, brandName: string
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:40px 20px;">
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e4e4e7;">
-        <tr><td style="background-color:#0a655a;padding:24px 32px;">
+        <tr><td style="background-color:#0a676c;padding:24px 32px;">
           <p style="margin:0;color:#ffffff;font-size:18px;font-weight:600;">${brandIcon(brandName)}${escapeHtml(brandName)}</p>
         </td></tr>
         <tr><td style="padding:32px;">
@@ -136,7 +136,7 @@ export const emailLayout = (heading: string, bodyHtml: string, brandName: string
 const paragraph = (text: string) =>
   `<p style="margin:0 0 16px;color:#52525b;font-size:15px;line-height:1.6;">${text}</p>`;
 const button = (href: string, label: string) =>
-  `<p style="margin:24px 0;"><a href="${href}" style="display:inline-block;background-color:#0a655a;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 20px;border-radius:8px;">${escapeHtml(label)}</a></p>`;
+  `<p style="margin:24px 0;"><a href="${href}" style="display:inline-block;background-color:#0a676c;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 20px;border-radius:8px;">${escapeHtml(label)}</a></p>`;
 
 // Send OTP email
 export const sendOTPEmail = async (email: string): Promise<{ success: boolean; error?: string }> => {
@@ -145,7 +145,7 @@ export const sendOTPEmail = async (email: string): Promise<{ success: boolean; e
   const html = emailLayout(
     'Verify your email',
     paragraph('Use this code to finish creating your account. It expires in 10 minutes.') +
-      `<p style="margin:0 0 24px;padding:20px;background-color:#f0fdfa;border-radius:8px;text-align:center;color:#0a655a;font-size:32px;font-weight:700;letter-spacing:8px;font-family:'Courier New',monospace;">${code}</p>` +
+      `<p style="margin:0 0 24px;padding:20px;background-color:#edf8f8;border-radius:8px;text-align:center;color:#0a676c;font-size:32px;font-weight:700;letter-spacing:8px;font-family:'Courier New',monospace;">${code}</p>` +
       paragraph("If you didn't request this code, you can ignore this email.")
   );
 

@@ -121,7 +121,7 @@ kbd {
 @media (max-width: 1000px) { .desk-layout { grid-template-columns: 1fr; } }
 
 /* ---- pop-out (Picture-in-Picture) and standalone widget ---- */
-.desk-pip-body, .widget { margin: 0; min-height: 100vh; background: var(--paper, #f3f5f2); }
+.desk-pip-body, .widget { margin: 0; min-height: 100vh; background: var(--paper, #f2f6f5); }
 .desk-pip, .widget { padding: 14px; font-family: var(--font-sans); }
 .desk-pip header, .widget-head { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
 .desk-pip header { flex-direction: column; align-items: flex-start; gap: 0; }
@@ -247,7 +247,7 @@ kbd {
 .qr-stage { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 1.5rem; border-radius: 16px; background: #e6eae5; }
 .qr-caption { margin: 0; font-size: 0.8125rem; color: var(--gray-500); }
 .qr-poster {
-  --poster-accent: #0e8f80;
+  --poster-accent: #0f9fa4;
   width: min(100%, 460px); aspect-ratio: 210 / 297; display: flex; flex-direction: column; align-items: center; text-align: center;
   padding: 7% 8%; background: white; color: var(--ink); box-shadow: 0 10px 30px rgba(28, 39, 51, 0.16); border-top: 14px solid var(--poster-accent);
 }

@@ -482,7 +482,7 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
   }, [isPrinting, joinResult, location, selectedServiceId]);
 
   const selectedService = location?.services.find(s => s.id === selectedServiceId);
-  const brandColor = location?.organization?.primaryColor || '#0e8f80';
+  const brandColor = location?.organization?.primaryColor || '#0f9fa4';
   const terms = termsFor(location?.organization);
   const kiosk = mode === 'kiosk';
 

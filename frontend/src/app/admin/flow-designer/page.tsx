@@ -856,7 +856,7 @@ const FlowDesignerPage: React.FC = () => {
             font-size: 0.65rem;
             padding: 0.125rem 0.375rem;
             border-radius: 4px;
-            background: rgba(14, 143, 128, 0.1);
+            background: rgba(15, 159, 164, 0.1);
             color: var(--primary);
           }
 

@@ -332,7 +332,7 @@ const MyQueuePage: React.FC = () => {
           .empty-icon {
             width: 100px;
             height: 100px;
-            background: rgba(14, 143, 128, 0.1);
+            background: rgba(15, 159, 164, 0.1);
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -394,7 +394,7 @@ const MyQueuePage: React.FC = () => {
           .service-select:focus {
             outline: none;
             border-color: var(--primary);
-            box-shadow: 0 0 0 4px rgba(14, 143, 128, 0.15);
+            box-shadow: 0 0 0 4px rgba(15, 159, 164, 0.15);
           }
 
           .join-btn {

@@ -304,7 +304,7 @@ export default function QueueStatusPage({
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'WAITING': return '#0e8f80';
+      case 'WAITING': return '#0f9fa4';
       case 'SERVING': return '#f59e0b';
       case 'SERVED': return '#10b981';
       case 'CANCELLED': case 'NO_SHOW': return '#ef4444';
@@ -365,7 +365,7 @@ export default function QueueStatusPage({
   const isCalled = status.status === 'SERVING';
   const isCompleted = status.status === 'SERVED' || status.status === 'CANCELLED' || status.status === 'NO_SHOW';
 
-  const brandColor = status.organization?.primaryColor || '#0e8f80';
+  const brandColor = status.organization?.primaryColor || '#0f9fa4';
 
   const renderLogo = () => (
     status.organization?.logoUrl ? (
@@ -829,7 +829,7 @@ const spinnerKeyframes = `
 // Styles
 const pageStyle: React.CSSProperties = {
   minHeight: '100vh',
-  background: 'var(--paper, #f3f5f2)',
+  background: 'var(--paper, #f2f6f5)',
   position: 'relative',
   overflow: 'hidden',
 };
@@ -863,7 +863,7 @@ const spinner: React.CSSProperties = {
   width: '40px',
   height: '40px',
   border: '3px solid #e2e6e3',
-  borderTopColor: '#0e8f80',
+  borderTopColor: '#0f9fa4',
   borderRadius: '50%',
   animation: 'spin 1s linear infinite',
 };
@@ -888,7 +888,7 @@ const errorContainer: React.CSSProperties = {
 const errorTitle: React.CSSProperties = {
   fontSize: '1.5rem',
   fontWeight: 700,
-  color: '#1c2733',
+  color: '#0d2a47',
   marginBottom: '0.5rem',
 };
 
@@ -901,7 +901,7 @@ const errorSubtitle: React.CSSProperties = {
 
 const homeButton: React.CSSProperties = {
   padding: '0.75rem 1.5rem',
-  background: '#0e8f80',
+  background: '#0f9fa4',
   color: 'white',
   borderRadius: '0.75rem',
   textDecoration: 'none',
@@ -913,7 +913,7 @@ const calledBanner: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.75rem',
   padding: '0.875rem 1.5rem',
-  background: '#1c2733',
+  background: '#0d2a47',
   borderRadius: '9999px',
   marginBottom: '1.25rem',
 };
@@ -940,7 +940,7 @@ const headerStyle: React.CSSProperties = {
   maxWidth: '440px',
   marginBottom: '1rem',
   paddingBottom: '0.75rem',
-  borderBottom: '3px solid #0e8f80',
+  borderBottom: '3px solid #0f9fa4',
 };
 
 const logoBox: React.CSSProperties = {
@@ -953,7 +953,7 @@ const headerInfo: React.CSSProperties = {
 
 const serviceName: React.CSSProperties = {
   fontWeight: 700,
-  color: '#1c2733',
+  color: '#0d2a47',
   fontSize: '1.125rem',
   margin: 0,
 };
@@ -1165,7 +1165,7 @@ const notifyButton: React.CSSProperties = {
   maxWidth: '440px',
   minHeight: '52px',
   marginTop: '1rem',
-  background: '#0e8f80',
+  background: '#0f9fa4',
   color: 'white',
   border: 'none',
   borderRadius: '14px',
@@ -1197,7 +1197,7 @@ const audioButton: React.CSSProperties = {
   gap: '0.5rem',
   minHeight: '48px',
   background: 'white',
-  color: '#1c2733',
+  color: '#0d2a47',
   border: '1.5px solid #cdd4d0',
   borderRadius: '14px',
   fontWeight: 600,
@@ -1223,7 +1223,7 @@ const refreshButton: React.CSSProperties = {
   gap: '0.5rem',
   minHeight: '48px',
   background: 'white',
-  color: '#1c2733',
+  color: '#0d2a47',
   border: '1.5px solid #cdd4d0',
   borderRadius: '14px',
   fontWeight: 600,
@@ -1239,7 +1239,7 @@ const shareButton: React.CSSProperties = {
   gap: '0.5rem',
   minHeight: '48px',
   background: 'white',
-  color: '#1c2733',
+  color: '#0d2a47',
   border: '1.5px solid #cdd4d0',
   borderRadius: '14px',
   fontWeight: 600,
@@ -1313,7 +1313,7 @@ const qrTicketInfo: React.CSSProperties = {
 const qrTicketLabel: React.CSSProperties = {
   fontSize: '1.125rem',
   fontWeight: 600,
-  color: '#0e8f80',
+  color: '#0f9fa4',
 };
 
 const shareUrlButton: React.CSSProperties = {
@@ -1323,7 +1323,7 @@ const shareUrlButton: React.CSSProperties = {
   gap: '0.5rem',
   width: '100%',
   padding: '0.875rem',
-  background: '#0e8f80',
+  background: '#0f9fa4',
   color: 'white',
   border: 'none',
   borderRadius: '0.75rem',
@@ -1494,7 +1494,7 @@ const identitySaveButton: React.CSSProperties = {
   width: '100%',
   marginTop: '1rem',
   padding: '0.75rem',
-  background: '#0e8f80',
+  background: '#0f9fa4',
   color: 'white',
   border: 'none',
   borderRadius: '0.5rem',

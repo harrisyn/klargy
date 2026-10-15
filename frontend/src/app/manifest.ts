@@ -13,8 +13,8 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     description: 'Queues, desks and lobby screens.',
     start_url: '/',
     display: 'standalone',
-    background_color: '#f3f5f2',
-    theme_color: '#1c2733',
+    background_color: '#f2f6f5',
+    theme_color: '#0d2a47',
     icons: [
       { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
       { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },

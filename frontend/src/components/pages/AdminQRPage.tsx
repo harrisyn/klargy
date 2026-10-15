@@ -41,7 +41,7 @@ export default function AdminQRPage() {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const joinUrl = location?.publicCode ? `${origin}/join/${location.publicCode}` : '';
   const shortUrl = joinUrl.replace(/^https?:\/\//, '');
-  const accent = org?.primaryColor || '#0e8f80';
+  const accent = org?.primaryColor || '#0f9fa4';
 
   const download = async () => {
     if (!joinUrl || !location) return;

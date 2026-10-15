@@ -258,9 +258,9 @@
 .tvNow span { font-size: clamp(0.9rem, 1.6vw, 1.25rem); color: #dfe6ea; }
 .tvNext { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .tvNext span { padding: 0.375rem 0.75rem; border-radius: 8px; background: rgba(255, 255, 255, 0.07); font-weight: 600; color: #c9d3dc; }
-.tvAd { position: relative; background: linear-gradient(160deg, #0e8f80, #0b5048); display: flex; flex-direction: column; justify-content: flex-end; padding: clamp(1rem, 3vw, 2rem); }
+.tvAd { position: relative; background: linear-gradient(160deg, #0f9fa4, #0a565a); display: flex; flex-direction: column; justify-content: flex-end; padding: clamp(1rem, 3vw, 2rem); }
 .tvAd p { margin: 0; font-family: var(--font-display); font-size: clamp(1.125rem, 2.4vw, 1.875rem); line-height: 1.1; max-width: 14ch; }
-.tvAd small { margin-top: 0.5rem; color: #cdeee8; }
+.tvAd small { margin-top: 0.5rem; color: #cfeeef; }
 .tvAdTag { position: absolute; top: 1rem; right: 1rem; font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 6px; background: rgba(0, 0, 0, 0.25); }
 .tvTicker { grid-column: 1 / -1; overflow: hidden; white-space: nowrap; background: var(--amber-400); color: var(--ink); font-weight: 600; padding: 0.625rem 0; }
 .tvTickerTrack { display: inline-block; padding-left: 100%; animation: ticker 26s linear infinite; }
@@ -284,7 +284,7 @@
   flex-wrap: wrap;
 }
 .closingInner h2 { color: white; margin: 0; font-family: var(--font-display); font-size: clamp(2rem, 4.2vw, 3.25rem); line-height: 1.02; letter-spacing: -0.025em; max-width: 16ch; }
-.closingInner p { margin: 0.875rem 0 0; color: #d3eee9; max-width: 44ch; }
+.closingInner p { margin: 0.875rem 0 0; color: #d2eff0; max-width: 44ch; }
 
 .footer {
   display: flex;
