@@ -209,6 +209,16 @@ const bar = embedDesk({
 });
 ```
 
+To offer only the rooms that belong where the practitioner is working, pass the kinds of room, and update them when they move to another part of your app:
+
+```ts
+const desk = embedDesk({ container, url, layout: 'bar', roomTypes: ['consultation'] });
+// later, at the front desk
+desk.setRoomTypes(['reception']);
+```
+
+The kinds are `ROOM_TYPES`: `reception`, `triage`, `consultation`, `cashier`, `pharmacy`, `lab`, `imaging` and `other`. An empty list offers every room.
+
 ## Development
 
 ```sh
