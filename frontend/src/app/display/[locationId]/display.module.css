@@ -71,6 +71,9 @@
 .main { position: relative; padding: 2.4vh 2.4vw; min-height: 0; overflow: hidden; }
 .split { position: relative; background: var(--bg); border-left: 1px solid var(--line); overflow: hidden; }
 .mediaEl { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Nobody interacts with lobby media, and an embed swallows the mouse and
+   taps the screen needs to wake its controls. */
+iframe.mediaEl { pointer-events: none; }
 .interstitial .mediaEl { background: #000; }
 
 .offline {
