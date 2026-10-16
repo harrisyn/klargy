@@ -42,6 +42,7 @@ import {
   getPublicOrganizationBySlug,
   getPublicOrganization,
 } from '../controllers/organization.controller';
+import { getSetupStatus, completeSetup } from '../controllers/setup.controller';
 import { getOrganizationByDomain } from '../controllers/customDomain.controller';
 import { getPublicLocationServices } from '../controllers/service.controller';
 import { sendOTP, verifyOTPCode } from '../controllers/auth.controller';
@@ -74,6 +75,10 @@ router.get('/public/orgs/by-domain/:domain', getOrganizationByDomain);
 router.get('/public/orgs/:orgId', getPublicOrganization);
 router.get('/public/orgs/:orgId/locations/:locationId/services', getPublicLocationServices);
 router.get('/public/invites/:code', previewInvite);
+
+// First-run setup: creates the first superadmin. Closed once one exists.
+router.get('/public/setup/status', getSetupStatus);
+router.post('/public/setup', limits.setup, completeSetup);
 
 // OTP verification (org sign-up)
 router.post('/public/send-otp', limits.sendCode, sendOTP);

@@ -990,6 +990,16 @@ model ExternalReference {
 // Superadmin-configured LLM provider (API key encrypted at rest). At most one
 // row is active; with none active, AI_PROVIDER + the provider's env key are
 // used (see services/ai/index.ts).
+// One-time token that authorises creating the first superadmin on a fresh
+// install (see services/setup.service.ts). Encrypted with
+// MASTER_ENCRYPTION_KEY; the row is deleted once setup completes. Unused when
+// SETUP_TOKEN is set in the environment.
+model SetupToken {
+  id             String   @id
+  encryptedToken String
+  createdAt      DateTime @default(now())
+}
+
 model AiProviderConfig {
   id              String   @id @default(uuid())
   provider        String   @unique // anthropic | openai | azure_openai | gemini | openai_compatible

@@ -4,6 +4,96 @@ The web app and the API are one Next.js project in `frontend/`. The API is the
 Express app in `frontend/src/server`, served from a single route,
 `frontend/src/pages/api/v1/[...path].ts`. There is no separate backend to deploy.
 
+## URLs
+
+Everything hangs off one root domain (`APP_DOMAIN`). Production examples use
+`yourapp.com`; local Docker uses `localhost:8003`.
+
+| What | Production | Local (Docker) |
+|---|---|---|
+| Marketing site, org sign-up (`/register`) | `https://yourapp.com` | `http://localhost:8003` |
+| **Superadmin** panel | `https://admin.yourapp.com` | `http://admin.localhost:8003` |
+| First-run setup (only until a superadmin exists) | `https://yourapp.com/setup` | `http://localhost:8003/setup` |
+| Superadmin login | `https://admin.yourapp.com/login` | `http://admin.localhost:8003/login` |
+| A tenant workspace | `https://<slug>.yourapp.com` | `http://<slug>.localhost:8003` |
+| Tenant staff login | `https://<slug>.yourapp.com/login` | `http://<slug>.localhost:8003/login` |
+| Public join / status / display pages | on the tenant host (`/join/...`, `/status/...`, `/display/...`) | same |
+| A tenant's custom domain (optional) | `https://queue.clinic.com` | n/a |
+| API | `<any host above>/api/v1` | same |
+| Cron endpoints | `/api/v1/cron/frequent`, `/api/v1/cron/daily` (Bearer `CRON_SECRET`) | n/a |
+| Mailpit (caught email) | n/a | `http://localhost:9025` |
+
+The root domain redirects `/superadmin` to the admin host. DNS needs the root
+domain and a wildcard record (`*.yourapp.com`) pointing at the app.
+
+Superadmin pages (all under `admin.<domain>`): Organizations, Subscription
+Plans, Add-on Pricing, Payment Providers, SMS Providers, AI Providers and
+File Storage.
+
+## Environment variables
+
+There is **one** template: [`.env.example`](../.env.example) at the repo root.
+It documents every variable and marks which are required in production.
+
+| You run | Copy the template to | Read by |
+|---|---|---|
+| `docker compose up` (dev) | `.env` (repo root) | `docker-compose.yml`, which has a development default for almost everything |
+| `docker compose -f docker-compose.prod.yml up -d` | `.env` (repo root) | the whole file is passed to the container |
+| `cd frontend && npm run dev` | `frontend/.env` | Next.js (port 3000: `APP_URL=http://localhost:3000`, `APP_DOMAIN=localhost:3000`) |
+| Vercel | Project Settings → Environment Variables | n/a |
+
+Both `.env` files are git-ignored. Generate each secret with
+`openssl rand -hex 32`.
+
+Required in production:
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string (pooled URL on Neon/Supabase) |
+| `JWT_SECRET` | Signs login tokens (the app refuses a short/default value) |
+| `MASTER_ENCRYPTION_KEY` | Encrypts stored payment keys, integration credentials, webhook secrets. **Never change it** once data exists |
+| `CRON_SECRET` | Bearer token for `/api/v1/cron/*` |
+| `APP_URL`, `APP_DOMAIN` | Public root URL and the same host without the scheme. Tenant and admin URLs derive from them |
+| `SMTP_HOST` (+ `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`) | Outgoing email: OTP codes, invites, notifications |
+| `REALTIME_*` | Live queue updates (Pusher/Ably/Soketi). Empty falls back to polling on Vercel; `docker-compose.prod.yml` requires them |
+
+Optional: `APP_NAME` (branding, default `Klargy`), `LEGAL_CONTACT_EMAIL`,
+Twilio SMS, AI keys, Vercel custom-domain automation. See the template.
+
+## First-run setup and the superadmin account
+
+A fresh database has no superadmin. Until one exists, **every page redirects
+to `/setup`**, where you create it. Nothing is created from environment
+variables or scripts.
+
+1. Deploy the app against an empty database (migrations run on start).
+2. Get the **setup token**, either:
+   - the `SETUP_TOKEN` value you put in `.env` / Vercel, or
+   - if you left it empty, the token the app generated and printed in the
+     server log the first time anyone opens the site
+     (`docker compose logs app`, or the Vercel function log). It is stored
+     encrypted (with `MASTER_ENCRYPTION_KEY`) in the `SetupToken` table.
+3. Open the site (`https://yourapp.com`, or `http://localhost:8003` locally).
+   You land on `/setup`: enter the token, your name, email and a password
+   (8+ characters).
+4. You are sent to `admin.<domain>/login`. Sign in; the panel is at
+   `admin.<domain>`.
+
+How it is protected and stored:
+
+- `/setup` and `POST /api/v1/public/setup` work **only while no superadmin
+  exists**. Afterwards `/setup` redirects to the login page and the API
+  answers 403.
+- The setup token is compared in constant time and attempts are rate limited.
+  It is deleted from the database when setup completes.
+- The superadmin is a normal user row with role `SUPER_ADMIN`. The password is
+  stored as a bcrypt hash (like every user's), never in plain text.
+- Set `SETUP_TOKEN` (or deploy privately) before exposing a new install to the
+  internet: whoever holds the token first becomes the superadmin.
+- Forgot the password? Use "Forgot password" on the login page (needs SMTP).
+  More superadmins are not created from the UI; to lose none, keep this
+  account safe.
+
 ## What you need
 
 | Piece | Recommended | Why |
@@ -26,7 +116,7 @@ Postgres, and background jobs run on Vercel Cron.
 2. **Create the database.** On Neon, use the pooled connection string (host
    contains `-pooler`) as `DATABASE_URL`.
 3. **Set environment variables.** Every variable is described in
-   `frontend/.env.example`. At minimum set:
+   `.env.example` at the repo root (see "Environment variables" above). At minimum set:
    `DATABASE_URL`, `JWT_SECRET`, `MASTER_ENCRYPTION_KEY`, `CRON_SECRET`,
    `APP_URL`, `APP_DOMAIN`, `APP_NAME`, the SMTP settings, and the
    `REALTIME_*` / `REALTIME_PUBLIC_*` values.
@@ -47,10 +137,8 @@ Postgres, and background jobs run on Vercel Cron.
    reminders and AI digests). Vercel sends `Authorization: Bearer $CRON_SECRET`
    automatically. Sub-daily schedules need a Pro plan; on Hobby, change
    `frequent` to once a day.
-7. **Create the first superadmin.** From `frontend/`, with `DATABASE_URL`
-   pointing at production:
-   `NODE_ENV=production ADMIN_EMAIL=you@yourapp.com ADMIN_PASSWORD='…' node scripts/create-superadmin.js`,
-   then sign in at `admin.yourapp.com/login`.
+7. **Create the first superadmin.** Open the site; you are sent to `/setup`.
+   See "First-run setup" above.
 
 ## AI-assisted analytics
 
@@ -90,27 +178,58 @@ and wait-spike alerts are statistical and work without any provider.
 
 ## Self-hosting (Docker)
 
-`frontend/Dockerfile` builds a standalone image that applies migrations on
-start and serves the app on port 3000:
+CI ([docker-publish.yml](../.github/workflows/docker-publish.yml)) builds
+`frontend/Dockerfile` and pushes `<DOCKERHUB_USERNAME>/queue-management` to
+Docker Hub on every push to `main` (needs the repo secrets `DOCKERHUB_USERNAME`
+and `DOCKERHUB_TOKEN`). The image applies migrations on start and serves the
+app on port 3000. Nothing is compiled into it: app name, domain and real-time
+settings are read from the environment at runtime, so one image works for any
+domain.
 
 ```bash
-docker build -t queue-app frontend
-docker run -p 3000:3000 --env-file .env queue-app
+cp .env.example .env     # fill in the values marked "REQUIRED in production"
+echo "DOCKERHUB_USERNAME=youruser" >> .env     # optionally IMAGE_TAG=<tag>
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-Nothing is compiled into the image: app name, domain and real-time settings are
-all read from the environment at runtime, so one image works anywhere (CI
-publishes it to Docker Hub; see `docker-compose.prod.yml`). For real-time,
-either use Pusher/Ably or run [Soketi](https://soketi.app) next to the app, as
-`docker-compose.yml` does. Put a TLS-terminating proxy that supports wildcard
-and on-demand certificates (Caddy works well) in front for tenant subdomains
-and custom domains. Schedule the two cron URLs with any scheduler.
+Then open your site to reach `/setup` and create the superadmin (see "First-run
+setup" above; the generated token is in `docker compose -f docker-compose.prod.yml logs app`).
+
+`docker-compose.prod.yml` runs the app (port 3000) and
+[Soketi](https://soketi.app) for real-time (port 6001); Postgres and SMTP are
+external. To use Pusher or Ably instead, drop the `soketi` service and point
+the `REALTIME_*` variables at them.
+
+In front of it, run a TLS-terminating reverse proxy (Caddy, nginx, Traefik, a
+cloud load balancer) that:
+
+- forwards `yourapp.com`, `*.yourapp.com` (tenants and `admin.`) and any
+  tenant custom domains to port 3000, preserving the `Host` header (tenant
+  resolution depends on it);
+- serves a wildcard certificate (DNS challenge) or issues certificates on demand;
+- exposes Soketi (6001) at the host you set as `REALTIME_PUBLIC_HOST`.
+
+Schedule the two cron URLs with any scheduler, sending
+`Authorization: Bearer $CRON_SECRET`:
+
+```bash
+# every 5 minutes
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://yourapp.com/api/v1/cron/frequent
+# daily
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://yourapp.com/api/v1/cron/daily
+```
+
+Building the image yourself instead: `docker build -t queue-app frontend`, then
+`docker run -p 3000:3000 --env-file .env queue-app`.
 
 ## Local development
 
 ```bash
 docker compose up        # app on :8003, Soketi on :6001, Mailpit UI on :9025
 ```
+
+Open http://localhost:8003: the first screen is `/setup` (the setup token is in
+the `app` container log).
 
 Postgres runs on the host by default (`DATABASE_URL` in the repo-root `.env`).
 Tenant subdomains work on `*.localhost`, for example `http://nyaho.localhost:8003`.
@@ -121,14 +240,13 @@ For a self-contained stack, run Postgres in Docker as well:
 # in .env: DATABASE_URL=postgresql://postgres:postgres@db:5432/qms_db
 docker compose --profile localdb up -d
 docker compose exec app npx prisma migrate deploy
-docker compose exec app node scripts/create-superadmin.js   # first platform admin
 ```
 
 The database is also reachable from the host on port 5433.
 
-Settings for `docker compose` go in the repo-root `.env` (see `.env.example`;
+Settings for `docker compose` go in the repo-root `.env` (copy `.env.example`;
 every value has a development default). Without Docker (`cd frontend && npm run dev`,
-on :3000), use `frontend/.env`: set `APP_URL=http://localhost:3000` and
+on :3000), copy the same template to `frontend/.env`: set `APP_URL=http://localhost:3000` and
 `APP_DOMAIN=localhost:3000`, or leave `APP_URL` empty and links follow the
 address the app is opened on. `MASTER_ENCRYPTION_KEY` may stay empty in
 development (the same development-only default as Docker). In production

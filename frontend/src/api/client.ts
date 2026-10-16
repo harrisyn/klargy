@@ -337,6 +337,16 @@ class ApiClient {
     return data;
   }
 
+  async getSetupStatus() {
+    const { data } = await this.client.get<{ needsSetup: boolean }>('/public/setup/status');
+    return data;
+  }
+
+  async completeSetup(body: { token: string; email: string; password: string; firstName: string; lastName: string }) {
+    const { data } = await this.client.post<{ email: string }>('/public/setup', body);
+    return data;
+  }
+
   async forgotPassword(email: string) {
     const { data } = await this.client.post('/auth/forgot-password', { email });
     return data;

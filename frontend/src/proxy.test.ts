@@ -9,11 +9,14 @@ vi.mock('@/server/lib/prisma', () => ({
     organization: { findUnique: vi.fn() },
     customDomain: { findFirst: vi.fn() },
     integration: { findMany: vi.fn() },
+    user: { count: vi.fn() },
+    setupToken: { findUnique: vi.fn(), createMany: vi.fn(), findUniqueOrThrow: vi.fn(), deleteMany: vi.fn() },
   },
 }));
 
 import prisma from '@/server/lib/prisma';
 import { proxy } from './proxy';
+import { resetSetupCache } from '@/server/services/setup.service';
 import { deskFrameAncestors } from './lib/deskEmbed';
 
 const request = (host: string, path: string) =>
@@ -21,6 +24,8 @@ const request = (host: string, path: string) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetSetupCache();
+  (prisma.user.count as any).mockResolvedValue(1); // a superadmin exists
   (prisma.organization.findUnique as any).mockImplementation(async ({ where }: any) => ({ slug: where.slug }));
 });
 
@@ -55,5 +60,22 @@ describe('desk frame-ancestors', () => {
       "frame-ancestors 'self' https://ok.example.com"
     );
     expect(deskFrameAncestors([])).toBeNull();
+  });
+});
+
+describe('first-run setup', () => {
+  it('sends every page to /setup while no superadmin exists', async () => {
+    (prisma.user.count as any).mockResolvedValue(0);
+    const res = await proxy(request('localhost:8003', '/login'));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/setup');
+    const setup = await proxy(request('localhost:8003', '/setup'));
+    expect(setup.headers.get('location')).toBeNull();
+  });
+
+  it('closes /setup once a superadmin exists', async () => {
+    const res = await proxy(request('localhost:8003', '/setup'));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/login');
   });
 });
