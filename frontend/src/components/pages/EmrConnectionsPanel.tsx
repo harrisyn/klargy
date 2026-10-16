@@ -7,6 +7,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { Badge, Button, EmptyState, Input, Modal, Select } from '@/components/ui';
 import { apiErrorMessage } from '@/components/auth/AuthShell';
+import { confirmDialog } from '@/lib/dialog';
 
 // EMR connections (Klargy Connect, docs/connect/v1.md): an API key the EMR
 // uses to register itself and publish its catalogue, and the screen where an
@@ -290,18 +291,22 @@ export default function EmrConnectionsPanel() {
     try { await action(); } catch (err) { setError(apiErrorMessage(err, 'That did not work.')); } finally { setBusyId(null); }
   };
 
-  const rotate = (i: EmrIntegration) => run(i.id, async () => {
-    if (!window.confirm(`Create a new API key for ${i.name}? The old key stops working immediately, so update your EMR straight after.`)) return;
-    const r = await api.rotateEmrIntegrationKey(i.id);
-    setApiKey(r.apiKey);
-    await load();
-  });
+  const rotate = async (i: EmrIntegration) => {
+    if (!(await confirmDialog({ title: `Create a new API key for ${i.name}?`, message: 'The old key stops working immediately, so update your EMR straight after.', confirmLabel: 'Create key' }))) return;
+    await run(i.id, async () => {
+      const r = await api.rotateEmrIntegrationKey(i.id);
+      setApiKey(r.apiKey);
+      await load();
+    });
+  };
 
-  const revoke = (i: EmrIntegration) => run(i.id, async () => {
-    if (!window.confirm(`Disconnect ${i.name}? Its key stops working and it stops receiving events. Matches are kept.`)) return;
-    await api.revokeEmrIntegration(i.id);
-    await load();
-  });
+  const revoke = async (i: EmrIntegration) => {
+    if (!(await confirmDialog({ title: `Disconnect ${i.name}?`, message: 'Its key stops working and it stops receiving events. Matches are kept.', confirmLabel: 'Disconnect', tone: 'danger' }))) return;
+    await run(i.id, async () => {
+      await api.revokeEmrIntegration(i.id);
+      await load();
+    });
+  };
 
   const status = (i: EmrIntegration) => {
     if (i.status === 'REVOKED') return <Badge tone="error">Disconnected</Badge>;

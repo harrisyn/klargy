@@ -7,6 +7,7 @@ import api from '@/api/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 import type { Desk, DeskInstance } from './useDesk';
 import { deskLabel } from './useDesk';
+import { confirmDialog } from '@/lib/dialog';
 
 interface LocationRow { id: string; name: string }
 
@@ -93,7 +94,7 @@ export function useDeskRooms(desk: Desk, preferServicePointId: string | null = n
   const choose = async (inst: DeskInstance) => {
     setProblem('');
     const taken = inst.isOccupied && inst.occupiedBy && inst.occupiedBy.id !== user?.id;
-    if (taken && !window.confirm(`${inst.occupiedBy!.firstName} ${inst.occupiedBy!.lastName} is signed in to ${deskLabel(inst)}. Take over this desk?`)) return;
+    if (taken && !(await confirmDialog({ title: 'Take over this desk?', message: `${inst.occupiedBy!.firstName} ${inst.occupiedBy!.lastName} is signed in to ${deskLabel(inst)}. Taking over signs them out of it.`, confirmLabel: 'Take over' }))) return;
     setPending(inst.id);
     try {
       await desk.signIn(inst, locationId, !!taken);

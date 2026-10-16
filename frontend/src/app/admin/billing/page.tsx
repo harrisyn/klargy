@@ -6,6 +6,7 @@ import { CheckCircle2, CreditCard, XCircle } from 'lucide-react';
 import api from '@/api/client';
 import Layout from '@/components/Layout';
 import { Button, Card, Badge, PageHeader, Icon, UsageBar, Input, Select } from '@/components/ui';
+import { confirmDialog } from '@/lib/dialog';
 
 interface Plan {
   id: string;
@@ -190,7 +191,7 @@ export default function BillingPage() {
   };
 
   const handleCancelAddOn = async (id: string) => {
-    if (!confirm('Cancel this add-on? Its extra capacity will be removed immediately.')) return;
+    if (!(await confirmDialog({ title: 'Cancel this add-on?', message: 'Its extra capacity is removed immediately.', confirmLabel: 'Cancel add-on', cancelLabel: 'Keep it', tone: 'danger' }))) return;
     try {
       await api.cancelAddOn(id);
       await load();

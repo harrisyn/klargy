@@ -9,6 +9,7 @@ import Layout from '@/components/Layout';
 import { PageHeader } from '@/components/ui';
 import { useAuthContext } from '@/contexts/AuthContext';
 import type { Location, Service, ServiceFlow } from '@/types';
+import { confirmDialog } from '@/lib/dialog';
 
 interface FlowNode {
   id: string;
@@ -189,7 +190,7 @@ const FlowDesignerPage: React.FC = () => {
   };
 
   const handleDeleteFlow = async (flowId: string) => {
-    if (!confirm('Are you sure you want to remove this flow connection?')) return;
+    if (!(await confirmDialog({ title: 'Remove this flow connection?', confirmLabel: 'Remove', tone: 'danger' }))) return;
     
     try {
       await api.deleteServiceFlow(flowId);

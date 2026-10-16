@@ -8,6 +8,7 @@ import api from '@/api/client';
 import { Icon, Card, Badge, Button, UsageBar, Input, Select } from '@/components/ui';
 import type { BadgeTone } from '@/components/ui';
 import { buildTenantUrl } from '@/lib/subdomain';
+import { confirmDialog, promptDialog } from '@/lib/dialog';
 
 interface OrganizationDetail {
   id: string;
@@ -141,9 +142,16 @@ export default function OrganizationDetailPage({
   };
 
   const handleCancelSubscription = async () => {
-    if (!confirm('Cancel this subscription? The organization will lose access at the end of their billing period.')) return;
-
-    const reason = prompt('Reason for cancellation (optional):');
+    const reason = await promptDialog({
+      title: 'Cancel this subscription?',
+      message: 'The organization loses access at the end of its billing period.',
+      label: 'Reason (optional)',
+      multiline: true,
+      confirmLabel: 'Cancel subscription',
+      cancelLabel: 'Keep it',
+      tone: 'danger',
+    });
+    if (reason === null) return;
 
     setCancelling(true);
     try {
@@ -177,7 +185,7 @@ export default function OrganizationDetailPage({
   const handleToggleStatus = async () => {
     if (!org) return;
     const nextStatus = org.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED';
-    if (nextStatus === 'PAUSED' && !confirm('Pause this organization? Their staff can still sign in, but customers won\'t be able to join queues or check ticket status until you reactivate it.')) return;
+    if (nextStatus === 'PAUSED' && !(await confirmDialog({ title: 'Pause this organization?', message: 'Their staff can still sign in, but customers can’t join queues or check ticket status until you reactivate it.', confirmLabel: 'Pause' }))) return;
 
     setStatusUpdating(true);
     try {
@@ -191,7 +199,7 @@ export default function OrganizationDetailPage({
   };
 
   const handleImpersonate = async () => {
-    if (!confirm(`Sign in as an admin of ${org?.name}? This will be logged.`)) return;
+    if (!(await confirmDialog({ title: `Sign in as an admin of ${org?.name}?`, message: 'This will be logged.', confirmLabel: 'Sign in' }))) return;
     setImpersonating(true);
     try {
       const result = await api.impersonateOrganization(id);
@@ -210,8 +218,13 @@ export default function OrganizationDetailPage({
   };
 
   const handleDelete = async () => {
-    if (!confirm('DELETE this organization? This action is IRREVERSIBLE and will delete ALL data including locations, services, users, and queue history.')) return;
-    if (!confirm('Are you ABSOLUTELY sure? Type DELETE to confirm.')) return;
+    if (!(await confirmDialog({
+      title: `Delete ${org?.name ?? 'this organization'}?`,
+      message: 'This is irreversible. It deletes all of its data, including locations, services, users and queue history.',
+      requireText: 'DELETE',
+      confirmLabel: 'Delete organization',
+      tone: 'danger',
+    }))) return;
 
     setDeleting(true);
     try {
