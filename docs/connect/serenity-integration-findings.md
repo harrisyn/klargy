@@ -213,3 +213,106 @@ Serenity (to be filled in by the Serenity changes):
 - **S8:** Setup shows "Registered with Klargy" and "Registered by this organisation" separately and refreshes after Register.
 - **S9:** Every delivery is recorded as processed or ignored with a reason; echoes of Serenity's own actions are ignored; `ticket_stored: false` now says why.
 - **S10:** Send to shows a success or failure toast from the job outcome.
+
+---
+
+# Revalidation: 2026-10-16
+
+Re-run after the Serenity fixes (`core-api-v2` up to `08c69c53`, `emr-nuxt-main` up to `5be76984`), same
+local setup. Klargy needed three newer migrations first (`20261017090000_connect_patient_journey`,
+`20261018090000_whatsapp_channel`, `20261018100000_booked_arrival`) and a Prisma client regenerate.
+
+## 7. Status of each finding
+
+| # | Finding | Status | Evidence |
+|---|---|---|---|
+| S1 | Queue tasks dropped silently / stuck behind a backlog | **Fixed, with a deployment condition** (see N2, N3) | Queue tasks now route to their own `queue-management` queue; the new `celery-queue-worker` logs `Queue Management tasks registered: [sync_queue_ticket, queue_journey_job, reconcile_queue_entries]` at start-up. A "Send to Laboratory" job ran within seconds and issued the lab ticket while `main-queue` still held 49,941 messages. |
+| S2 | No catch-up after downtime | **Fixed** | `reconcile_queue_entries` walked Klargy's changes (2 pages, 1 entry) and applied the `entry.served` Serenity had missed (`sent_by: reconcile`); its cursor advanced. After restarting `celery-beat`, `redbeat:reconcile-queue-entries` is registered (every 5 minutes). |
+| S3 | Desk refused from origins registered with Klargy | **Fixed** | The setup tab has "Serenity Addresses Allowed To Show The Queue Desk"; registering saves it first. The desk launched from `http://nyaho.localhost:8084` and the room picker, call and complete all worked. |
+| S4 | Registered webhook/lookup URLs unseen and not overridable | **Partly fixed** | `webhook_url` and `lookup_url` are now stored in the subscription config, and the backend accepts `apiBaseUrl` and a `PUBLIC_API_URL` setting. The panel still shows only the desk addresses, and has no field for the API address. With neither set, Register sends `SERVER_HOST` (`http://api.serenity.health`); I registered with the override from the page. |
+| S5 | `this.$notify` is not a function | **Fixed** | Calling a ticket shows "Called L001 · Baby Yaa Test · Open visit"; no console error. |
+| S6 | Noisy catalogue | **Not fixed** | Klargy's match list still offers `Inactive Clinic`, `Offline Clinic`, `Test`, `Test GP parent`, `Test Insurance Clinic`, `Zero-Charge Clinic`, five GP variants, and a duplicate `physician specialist (airport main)`. The publish now sends 74 services (was 60 clinics) because department services were added. |
+| S7 | Plugin still described as phase 1 | **Fixed** | Description now covers tickets, desk, portal ticket, journey, appointments, figures and catch-up; version 1.6.0. |
+| S8 | Two meanings of "registered" | **Fixed** | After Test connection the panel shows "Registered with Klargy" and "Registered by this organization" separately. |
+| S9 | Webhooks acknowledged but unrecorded | **Fixed** | Each delivery logs `processed: {…}` or `ignored (echo)` / `ignored (nothing to do for journey.completed)`. `entry.called` now says `ticket: unchanged (L001 already on the visit)`; `entry.served` says `encounter: skipped: no encounter on the ticket`. |
+| S10 | No visible confirmation after "Send to…" | **Inconclusive** | The button now shows a spinner while the job runs and the ticket appeared in Klargy. I did not capture a success or failure message in the screenshots taken. |
+
+Journey Klargy → Serenity events seen after the fixes: `servicepoint.opened/closed`, `entry.called`,
+`entry.served`, `journey.completed`, plus echoes of Serenity's own `queue.resumed` and
+`appointment.rescheduled` (ignored as echoes).
+
+## 8. New findings
+
+### N1 (High): the floating queue desk never appears for a normal session
+- `QueueDeskHost` shows the desk only when `store.state.auth.loggedIn` is true. That flag is not restored on
+  reload (`WorkspaceDashboardShell.vue` says so in a comment and uses the access-token cookie instead). In
+  this run it was `false` right after a normal sign-in, and after a reload, even though the session worked and
+  the `loggedIn` cookie was set. No desk element was rendered until the flag was set by hand
+  (`dispatch('auth/setLoggedIn', true)`); after that the bar appeared and everything worked.
+- Fix: use the same session check as `WorkspaceDashboardShell` (`auth/isLoggedIn`, the stored tokens, or the
+  `v2token` cookie) in `QueueDeskHost.show` and wherever else the desk reads `auth.loggedIn`.
+
+### N2 (Medium): `worker-start.sh` does not consume the queue-management queue by default
+- The comments in `celery_app.py` say "worker-start.sh consumes it alongside main-queue", but the default is
+  `CELERY_QUEUES=main-queue,heavy-queue,sweep-queue`. Queue tasks are only consumed by the separate
+  `celery-queue-worker` service (`CELERY_QUEUES=queue-management`). A stack running only `celery-worker`
+  accepts the tasks and never runs them, which is the original silent-drop problem again.
+- Fix: include `queue-management` in the default list, or make the start-up check fail loudly when no worker
+  in the deployment consumes it.
+
+### N3 (Medium, deployment): running containers don't pick up the new tasks, queue or schedule
+- Serenity's code is bind-mounted, but the running `celery-worker` image was 10 days old, `celery-beat` had
+  been running since October 14, and `celery-queue-worker` did not exist. Until I started it and restarted
+  beat, queue tasks went to a queue nobody read and the 5-minute catch-up was not scheduled
+  (`reconcile_last_run` was stale, with an error from an earlier run).
+- Fix: add to the deployment checklist: start `celery-queue-worker`, restart `celery-beat` (redbeat reads the
+  schedule at start) and each worker, then check the start-up log line for registered tasks.
+- The 49,941 messages in `main-queue` are still there; consider expiring old periodic tasks (`expires`).
+
+### N4 (Low): an expected 404 is logged as an error with a traceback
+- Before issuing or transferring, the worker asks Klargy whether the visit holds an open ticket. Klargy answers
+  404 `NO_OPEN_ENTRY` when it doesn't, and the worker logs it with a full `PluginExecutionError` traceback
+  before carrying on. Treat that code as a normal "no" and log it at info.
+
+### K6 (Klargy, Medium): a database/schema mismatch reaches the user as a raw Prisma error
+- With Klargy's database behind its code, the desk bar embedded in Serenity showed
+  "Invalid `prisma.queue.f…`" in the page. Return a generic message to the client and keep the detail in the
+  server log.
+
+## 9. Checks re-run and unchanged
+
+- Webhook and lookup signature checks: same results as section 3 (missing, wrong, stale and tampered
+  signatures rejected; malformed JSON 400; unknown connection 404; public lookup returns only the first
+  name). Delivery ids are de-duplicated across runs: reusing ids from the earlier run returned
+  `{"duplicate": true}`.
+- Phase 5 calls: `setTicketPriority`, `getAnalytics`, `setServiceStatus` (pause and resume),
+  `upsertAppointment`, `getVisitEntry` and `getMappedServices` all succeeded.
+
+## 10. What this revalidation added to the environment
+
+- Serenity: started `celery-queue-worker` (new container); my `docker compose up` also recreated the `backend`
+  container, whose start-up migration step found nothing to apply (the database was already at
+  `20261022_queue_mgmt_staff_desk`); restarted `celery-beat`.
+- Serenity (staging data): a second ticket for visit `9a7169b0-7e31-496c-89ac-41d93b884ef8` (laboratory
+  `L001`, called and completed); `int-test-appt-1` re-synced with a new time.
+- Klargy (local): three more migrations applied and the client regenerated; dev server restarted with
+  `APP_URL=http://localhost:3000`.
+
+---
+
+# Follow-up fixes: 2026-10-16
+
+Applied in the Serenity repos (uncommitted) and checked live against the running stack.
+
+| Item | Change | Check |
+|---|---|---|
+| N1 desk hidden | `QueueDeskHost` now uses a shared session check (`libs/queue-desk/session.js`: store flag, either stored token, or the `v2token` cookie) instead of `auth.loggedIn` alone. | After a plain reload (flag still `false`) the desk and its frame render with no manual step. Jest: 95 queue-desk and setup tests pass. |
+| N2 default worker queues | `worker-start.sh` consumes all four queues by default; `QUEUE_MANAGEMENT_QUEUE` is a real constant in `ALL_QUEUES`; the stack file has a `celery-queue` role (it had none, so production would not have consumed the queue); checklist updated. | Routing tests updated and passing. |
+| Related routing bug | The "route scheduled tasks to the sweep queue" loop also re-routed `reconcile_queue_entries`. It now leaves queue-management tasks alone. The stale test that expected `sync_queue_ticket` on `main-queue` was replaced. | Three new routing tests; 82 queue and routing tests pass. |
+| N4 log noise | A coded 4xx provider answer (e.g. `NO_OPEN_ENTRY`) is logged at info, without a traceback (`is_provider_refusal` in `plugins/service.py`); everything else still logs the full error. | Worker log: "…was refused by the provider…" at INFO; the same job then issued the ticket. |
+| S4 API address | New optional "Serenity API address" field, saved with the settings (`api_base_url`), validated as http(s) and used when registering; a value on the call wins. | The real Register button registered `localhost:9001`; the panel lists the Webhook URL, Lookup URL and Desk addresses. |
+| S6 catalogue | The publisher already excluded inactive clinics, dead locations and inactive practitioners. The odd clinics (`Inactive Clinic`, `Offline Clinic`, `Test`, `Zero-Charge Clinic`, …) are **active, undeleted records in the data**, so this needs a data clean-up. Code change: clinics that still share a name at one location are now numbered ("Physician Specialist (2)"). | Unit test added. |
+| S10 confirmation | Already implemented (`toastJobResult`). The pending notice "Sending to Airport Main Pharmacy. The queue will update in a moment." showed, and the pharmacy ticket `P001` was issued. I did not catch the final success notice on screen. | |
+| K6 / K2 (Klargy) | Klargy's error handler already returns a generic message in production and never returns stack traces; the raw Prisma text I saw was a development build. No change needed. | |
+
+Restarts needed after deploying these: backend, `celery-worker`, `celery-queue-worker` (done locally).
