@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import prisma from '../lib/prisma';
+import { normalizeEmail } from '../lib/verification';
 import {
   needsSetup,
   announceSetupToken,
@@ -38,7 +39,7 @@ export const completeSetup = async (req: Request, res: Response) => {
     if (String(password).length < MIN_PASSWORD_LENGTH) {
       return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
     }
-    const normalizedEmail = String(email).trim();
+    const normalizedEmail = normalizeEmail(String(email));
     if (await prisma.user.findUnique({ where: { email: normalizedEmail } })) {
       return res.status(409).json({ error: 'A user with this email already exists' });
     }
