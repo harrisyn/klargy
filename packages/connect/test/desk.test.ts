@@ -67,6 +67,7 @@ describe('parseDeskMessage', () => {
       'klargy:entry-updated',
       'klargy:resize',
       'klargy:logout',
+      'klargy:room-types',
     ]);
   });
 });
@@ -88,6 +89,12 @@ describe('deskUrl', () => {
   it('leaves the URL alone for the default layout', () => {
     expect(deskUrl(URL_)).toBe(URL_);
     expect(deskUrl(URL_, 'default')).toBe(URL_);
+    expect(deskUrl(URL_, 'default', [])).toBe(URL_);
+  });
+
+  it('limits the room picker to the kinds of room given', () => {
+    expect(deskUrl(URL_, 'bar', ['consultation', 'triage'])).toBe(`${URL_}&layout=bar&roomTypes=consultation%2Ctriage`);
+    expect(deskUrl(URL_, 'default', ['lab'])).toBe(`${URL_}&roomTypes=lab`);
   });
 });
 
@@ -156,6 +163,17 @@ describe('embedDesk', () => {
     desk.logout();
     expect(frameWindow.postMessage).toHaveBeenCalledTimes(1);
     expect(onWaiting).not.toHaveBeenCalled();
+  });
+
+  it('loads with the room types and posts changes to the desk origin only', () => {
+    const { win, iframe, frameWindow } = fakes();
+    const desk = embedDesk({ url: URL_, iframe, window: win, roomTypes: ['reception'] });
+    expect(iframe.src).toBe(`${URL_}&roomTypes=reception`);
+    desk.setRoomTypes(['lab', 'imaging']);
+    expect(frameWindow.postMessage).toHaveBeenCalledWith({ type: 'klargy:room-types', roomTypes: ['lab', 'imaging'] }, ORIGIN);
+    desk.destroy();
+    desk.setRoomTypes([]);
+    expect(frameWindow.postMessage).toHaveBeenCalledTimes(1);
   });
 
   it('creates an iframe in a container and removes it on destroy', () => {

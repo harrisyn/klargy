@@ -4,7 +4,10 @@ import {
   isLogoutRequest,
   postToHost,
   readLaunch,
+  parseRoomTypes,
   resizeReporter,
+  roomTypesFrom,
+  roomTypesRequest,
   saveLaunch,
   targetOriginFor,
   withoutLaunchCode,
@@ -114,5 +117,29 @@ describe('resizeReporter', () => {
     report(60);
     report(60);
     expect(post).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('room types', () => {
+  it('reads known kinds of room from the URL, lower-cased, without repeats', () => {
+    expect(roomTypesFrom('?launch=x&roomTypes=Consultation,triage,consultation,bogus')).toEqual(['consultation', 'triage']);
+    expect(roomTypesFrom('?layout=bar')).toEqual([]);
+    expect(parseRoomTypes(['lab', 3, 'imaging'])).toEqual(['lab', 'imaging']);
+    expect(parseRoomTypes(null)).toEqual([]);
+  });
+
+  it('keeps roomTypes when the launch code is removed', () => {
+    expect(withoutLaunchCode('?launch=abc&layout=bar&roomTypes=reception')).toBe('?layout=bar&roomTypes=reception');
+  });
+
+  it('takes klargy:room-types only from the launch origin and the parent window', () => {
+    const parent = {};
+    const data = { type: 'klargy:room-types', roomTypes: ['reception', 'nope'] };
+    expect(roomTypesRequest({ origin: 'https://emr.example.com', source: parent, data }, launch, parent)).toEqual(['reception']);
+    expect(roomTypesRequest({ origin: 'https://emr.example.com', source: parent, data: { type: 'klargy:room-types', roomTypes: [] } }, launch, parent)).toEqual([]);
+    expect(roomTypesRequest({ origin: 'https://evil.example.com', source: parent, data }, launch, parent)).toBeNull();
+    expect(roomTypesRequest({ origin: 'https://emr.example.com', source: {}, data }, launch, parent)).toBeNull();
+    expect(roomTypesRequest({ origin: 'https://emr.example.com', source: parent, data: { type: 'klargy:logout' } }, launch, parent)).toBeNull();
+    expect(roomTypesRequest({ origin: 'https://emr.example.com', source: parent, data }, null, parent)).toBeNull();
   });
 });

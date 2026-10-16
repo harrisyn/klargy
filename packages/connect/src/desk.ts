@@ -18,6 +18,8 @@ export const DESK_MESSAGES = {
   resize: 'klargy:resize',
   /** Host to desk. */
   logout: 'klargy:logout',
+  /** Host to desk: limit the room picker to these kinds of room; additive in v1. */
+  roomTypes: 'klargy:room-types',
 } as const;
 
 export type DeskServicePoint = {
@@ -42,16 +44,23 @@ export type DeskMessage =
  * bar (about 60px tall, taller while a menu is open) for a floating toolbar. */
 export type DeskLayout = 'default' | 'bar';
 
-/** The launch URL with the layout set (`layout=bar`), or unchanged for the default. */
-export function deskUrl(url: string, layout: DeskLayout = 'default'): string {
-  if (layout === 'default') return url;
+/** Kinds of room (Klargy service point types) the room picker can be limited to. */
+export const ROOM_TYPES = ['reception', 'triage', 'consultation', 'cashier', 'pharmacy', 'lab', 'imaging', 'other'] as const;
+export type RoomType = (typeof ROOM_TYPES)[number];
+
+/** The launch URL with the layout set (`layout=bar`) and the room picker
+ * limited to `roomTypes` (`roomTypes=consultation,triage`); unchanged for
+ * the default layout and any room. */
+export function deskUrl(url: string, layout: DeskLayout = 'default', roomTypes: readonly RoomType[] = []): string {
+  if (layout === 'default' && !roomTypes.length) return url;
   const parsed = new URL(url);
-  parsed.searchParams.set('layout', layout);
+  if (layout !== 'default') parsed.searchParams.set('layout', layout);
+  if (roomTypes.length) parsed.searchParams.set('roomTypes', roomTypes.join(','));
   return parsed.toString();
 }
 
-/** Messages the parent may post to the desk. */
-export type HostMessage = { type: 'klargy:logout' };
+/** Messages the parent may post to the desk. An empty `roomTypes` offers every room. */
+export type HostMessage = { type: 'klargy:logout' } | { type: 'klargy:room-types'; roomTypes: RoomType[] };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -128,6 +137,9 @@ export interface EmbedDeskOptions {
   title?: string;
   /** `bar` loads the compact one-row layout (adds `layout=bar` to `url`). */
   layout?: DeskLayout;
+  /** Offer only these kinds of room in the room picker (e.g. `['consultation']`
+   * in an outpatient area). Change it later with `setRoomTypes`. */
+  roomTypes?: readonly RoomType[];
   onReady?: (message: { contract: string }) => void;
   onDeskChanged?: (servicePoint: DeskServicePoint | null) => void;
   onWaiting?: (count: number) => void;
@@ -146,6 +158,9 @@ export interface DeskEmbed {
   readonly origin: string;
   /** Asks the desk to leave its room and sign out (send when the practitioner signs out of the EMR). */
   logout(): void;
+  /** Limits the room picker to these kinds of room (send when the practitioner
+   * moves to another part of the EMR); an empty list offers every room. */
+  setRoomTypes(roomTypes: readonly RoomType[]): void;
   /** Stops listening, and removes the iframe if embedDesk created it. */
   destroy(): void;
 }
@@ -157,7 +172,7 @@ export interface DeskEmbed {
  */
 export function embedDesk(options: EmbedDeskOptions): DeskEmbed {
   const origin = deskOrigin(options.url);
-  const src = deskUrl(options.url, options.layout);
+  const src = deskUrl(options.url, options.layout, options.roomTypes);
   const win = options.window ?? (typeof window !== 'undefined' ? (window as MessageWindow) : undefined);
   if (!win) throw new TypeError('embedDesk needs a window (pass options.window outside a browser)');
 
@@ -215,6 +230,11 @@ export function embedDesk(options: EmbedDeskOptions): DeskEmbed {
     logout() {
       if (destroyed) return;
       const message: HostMessage = { type: DESK_MESSAGES.logout };
+      frame.contentWindow?.postMessage(message, origin);
+    },
+    setRoomTypes(roomTypes) {
+      if (destroyed) return;
+      const message: HostMessage = { type: DESK_MESSAGES.roomTypes, roomTypes: [...roomTypes] };
       frame.contentWindow?.postMessage(message, origin);
     },
     destroy() {

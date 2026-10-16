@@ -63,6 +63,8 @@ interface OperatorData {
 export interface DeskInstance {
   id: string;
   servicePointId?: string;
+  /** RECEPTION, TRIAGE, CONSULTATION, CASHIER, PHARMACY, LAB, IMAGING or OTHER. */
+  servicePointType?: string;
   instanceNumber: number;
   displayName: string | null;
   servicePointName: string;

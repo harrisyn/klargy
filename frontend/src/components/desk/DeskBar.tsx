@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui';
 import type { Desk, DeskEntry, DeskInstance } from './useDesk';
 import { bookedLabel, bookedTitle, deskLabel, minutesAgo, personName } from './useDesk';
 import { useDeskRooms, type DeskRoomGroup } from './DeskPicker';
+import type { RoomType } from './connectBridge';
 
 /**
  * The desk as one horizontal bar (`/widget/desk?layout=bar`), for a host
@@ -32,6 +33,8 @@ export interface DeskBarRooms {
   pending: string | null;
   problem: string;
   choose: (inst: DeskInstance) => void | Promise<void>;
+  /** The host's kinds of room matched none here, so every room is listed. */
+  typeFallback?: boolean;
 }
 
 type Panel = 'transfer' | 'more' | 'pick' | null;
@@ -196,7 +199,7 @@ export function DeskBarView({
           </>
         ) : (
           <>
-            <span className="desk-bar-hint">{rooms.pending ? 'Signing in…' : 'Pick the room you’re working in to start calling.'}</span>
+            <span className="desk-bar-hint">{rooms.pending ? 'Signing in…' : rooms.typeFallback ? 'No rooms of the kind used here, so all rooms are listed. Pick yours to start calling.' : 'Pick the room you’re working in to start calling.'}</span>
             <div className="desk-bar-actions">
               <button type="button" className="desk-btn desk-btn-quiet desk-bar-more" onClick={() => toggle('more')} aria-expanded={panel === 'more'} aria-label="More" title="More">
                 {panel === 'more' ? <X size={16} /> : <Ellipsis size={16} />}
@@ -334,8 +337,8 @@ function PickRow({ entry, desk, disabled, onCall }: { entry: DeskEntry; desk: De
 
 /** The bar with its data: the rooms of the practitioner's location and the
  * services they can transfer to (the flow's usual next ones first). */
-export default function DeskBar({ desk, onSignOut, preferServicePointId = null }: { desk: Desk; onSignOut: () => void; preferServicePointId?: string | null }) {
-  const rooms = useDeskRooms(desk, preferServicePointId);
+export default function DeskBar({ desk, onSignOut, preferServicePointId = null, roomTypes = [] }: { desk: Desk; onSignOut: () => void; preferServicePointId?: string | null; roomTypes?: readonly RoomType[] }) {
+  const rooms = useDeskRooms(desk, preferServicePointId, roomTypes);
   const locationId = desk.desk?.locationId;
   const serviceId = desk.desk?.serviceId;
   const nextServices = desk.data?.nextServices;
