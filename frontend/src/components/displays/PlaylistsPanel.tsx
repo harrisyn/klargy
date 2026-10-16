@@ -7,6 +7,7 @@ import type { DisplayMediaItem, DisplayPlaylist } from '@/api/client';
 import { Button, Switch } from '@/components/ui';
 import { toast, errorMessage } from '@/lib/toast';
 import { localDay } from '@/lib/localDate';
+import { confirmDialog } from '@/lib/dialog';
 
 /**
  * Scheduled playlists: which media plays on which days, at which times and
@@ -212,7 +213,7 @@ export default function PlaylistsPanel({ media, locations }: { media: DisplayMed
   };
 
   const remove = async (p: DisplayPlaylist) => {
-    if (!window.confirm(`Delete “${p.name}”? The media stays in your library.`)) return;
+    if (!(await confirmDialog({ title: `Delete “${p.name}”?`, message: 'The media stays in your library.', tone: 'danger' }))) return;
     try {
       await api.deleteDisplayPlaylist(p.id);
       setPlaylists((list) => list?.filter((x) => x.id !== p.id) || null);

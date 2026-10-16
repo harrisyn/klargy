@@ -11,6 +11,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import Layout from '@/components/Layout';
 import { PageHeader, Button, Switch } from '@/components/ui';
 import PlaylistsPanel from '@/components/displays/PlaylistsPanel';
+import { confirmDialog } from '@/lib/dialog';
 
 interface LocationRow { id: string; name: string; publicCode?: string | null }
 
@@ -203,7 +204,7 @@ export default function AdminDisplaysPage() {
   };
 
   const remove = async (item: DisplayMediaItem) => {
-    if (!window.confirm(`Remove “${item.title}” from every screen?`)) return;
+    if (!(await confirmDialog({ title: `Remove “${item.title}”?`, message: 'It comes off every screen that plays it.', confirmLabel: 'Remove', tone: 'danger' }))) return;
     const before = media;
     setMedia((list) => list.filter((m) => m.id !== item.id));
     try { await api.deleteDisplayMedia(item.id); refreshEntitlement(); } catch {
@@ -252,9 +253,10 @@ export default function AdminDisplaysPage() {
       {locations.length > 1 && (
         <div className="displays-location">
           <label htmlFor="display-location">Screen at</label>
-          <select id="display-location" value={locationId} onChange={(e) => {
-            if (dirty && !window.confirm('Leave without saving this screen’s changes?')) return;
-            setLocationId(e.target.value);
+          <select id="display-location" value={locationId} onChange={async (e) => {
+            const next = e.target.value;
+            if (dirty && !(await confirmDialog({ title: 'Leave without saving?', message: 'This screen’s changes will be lost.', confirmLabel: 'Leave', cancelLabel: 'Stay', tone: 'danger' }))) return;
+            setLocationId(next);
           }}>
             {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
