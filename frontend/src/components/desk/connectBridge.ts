@@ -34,6 +34,28 @@ export function deskLayoutFrom(search: string): DeskLayout {
   return new URLSearchParams(search).get('layout') === 'bar' ? 'bar' : 'default';
 }
 
+/** Kinds of room (service point types) a host can limit the room picker
+ * to, in the protocol's lower-case spelling. */
+export const ROOM_TYPES = ['reception', 'triage', 'consultation', 'cashier', 'pharmacy', 'lab', 'imaging', 'other'] as const;
+export type RoomType = (typeof ROOM_TYPES)[number];
+
+/** Known room types from a list or a comma-separated string, lower-cased,
+ * without repeats; unknown names are dropped. Empty means "any room". */
+export function parseRoomTypes(value: unknown): RoomType[] {
+  const parts = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  const out: RoomType[] = [];
+  parts.forEach((part) => {
+    const name = typeof part === 'string' ? part.trim().toLowerCase() : '';
+    if ((ROOM_TYPES as readonly string[]).includes(name) && !out.includes(name as RoomType)) out.push(name as RoomType);
+  });
+  return out;
+}
+
+/** The room types named in the desk URL (`roomTypes=consultation,triage`). */
+export function roomTypesFrom(search: string): RoomType[] {
+  return parseRoomTypes(new URLSearchParams(search).get('roomTypes'));
+}
+
 /** The query string without the one-time launch code, keeping everything
  * else (such as `layout`), so a reload doesn't send the code again. */
 export function withoutLaunchCode(search: string): string {
@@ -88,10 +110,29 @@ export function isLogoutRequest(
   launch: DeskLaunch | null,
   parent: unknown
 ): boolean {
+  return hostMessage(event, launch, parent)?.type === 'klargy:logout';
+}
+
+/** The parent's message that is really from the EMR (its origin and window),
+ * or null. */
+function hostMessage(event: { origin: string; source: unknown; data: unknown }, launch: DeskLaunch | null, parent: unknown) {
   const target = targetOriginFor(launch);
-  if (!target || event.origin !== target || event.source !== parent) return false;
+  if (!target || event.origin !== target || event.source !== parent) return null;
   const data = event.data as { type?: unknown } | null;
-  return !!data && typeof data === 'object' && data.type === 'klargy:logout';
+  return data && typeof data === 'object' ? (data as Record<string, unknown>) : null;
+}
+
+/** The room types from the EMR's `klargy:room-types` message (it sends one
+ * when the user moves to another part of the EMR), or null when the event
+ * isn't one. An empty list means any room. */
+export function roomTypesRequest(
+  event: { origin: string; source: unknown; data: unknown },
+  launch: DeskLaunch | null,
+  parent: unknown
+): RoomType[] | null {
+  const data = hostMessage(event, launch, parent);
+  if (!data || data.type !== 'klargy:room-types') return null;
+  return parseRoomTypes(data.roomTypes);
 }
 
 export function readLaunch(storage: Pick<Storage, 'getItem'> | null | undefined = safeSession()): DeskLaunch | null {

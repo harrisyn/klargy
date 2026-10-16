@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CONNECT_ERROR_CODES, CONNECT_SCOPES, CONTRACT, LOOKUP_IDENTIFIER_TYPES, WEBHOOK_EVENTS, WEBHOOK_HEADERS } from '../src/index';
-import { DESK_MESSAGES } from '../src/desk';
+import { DESK_MESSAGES, ROOM_TYPES } from '../src/desk';
 
 // The Klargy app keeps its own copy of the protocol (its Docker build only
 // sees frontend/). These checks fail when the two drift apart. They run only
@@ -26,6 +26,7 @@ describe.skipIf(!inRepo)('parity with the Klargy app', () => {
     expect(bridge).toContain(`CONTRACT = '${CONTRACT}'`);
     const types = new Set(quoted(bridge, /'(klargy:[a-z-]+)'/g));
     expect([...types].sort()).toEqual(Object.values(DESK_MESSAGES).sort());
+    expect(arrayLiteral(bridge, 'ROOM_TYPES')).toEqual([...ROOM_TYPES]);
   });
 
   it('lists the same webhook events and signs with the same headers', () => {
