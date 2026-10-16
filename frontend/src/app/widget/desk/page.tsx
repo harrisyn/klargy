@@ -16,11 +16,14 @@ import {
   postToHost,
   readLaunch,
   resizeReporter,
+  roomTypesFrom,
+  roomTypesRequest,
   saveLaunch,
   withoutLaunchCode,
   type DeskLaunch,
   type DeskLayout,
   type DeskMessage,
+  type RoomType,
 } from '@/components/desk/connectBridge';
 import { extractSubdomain } from '@/lib/subdomain';
 
@@ -31,6 +34,8 @@ import { extractSubdomain } from '@/lib/subdomain';
  * Klargy Connect (opened with ?launch=<code>, docs/connect/v1.md section 6).
  * `?layout=bar` lays it out as one compact bar for a host's floating
  * toolbar; the bar reports the height it needs with klargy:resize.
+ * `?roomTypes=consultation,triage` (and the klargy:room-types message)
+ * limits the room picker to those kinds of room.
  */
 
 function WidgetSignIn() {
@@ -69,6 +74,9 @@ const parentWindow = () => (typeof window !== 'undefined' && window.parent !== w
 
 function WidgetDesk({ launch, layout, onSignedOut }: { launch: DeskLaunch | null; layout: DeskLayout; onSignedOut: () => void }) {
   const { logout, isStaff } = useAuthContext();
+  // The kinds of room the EMR offers here: from the URL (`roomTypes=`), then
+  // from klargy:room-types whenever the practitioner moves to another area.
+  const [roomTypes, setRoomTypes] = useState<RoomType[]>(() => (typeof window !== 'undefined' ? roomTypesFrom(window.location.search) : []));
 
   const post = useCallback((message: DeskMessage) => postToHost(parentWindow(), launch, message), [launch]);
 
@@ -141,7 +149,12 @@ function WidgetDesk({ launch, layout, onSignedOut }: { launch: DeskLaunch | null
   useEffect(() => {
     if (!launch) return;
     const onMessage = (e: MessageEvent) => {
-      if (isLogoutRequest(e, launch, parentWindow())) signOut();
+      if (isLogoutRequest(e, launch, parentWindow())) {
+        signOut();
+        return;
+      }
+      const types = roomTypesRequest(e, launch, parentWindow());
+      if (types) setRoomTypes((current) => (current.join(',') === types.join(',') ? current : types));
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
@@ -151,8 +164,8 @@ function WidgetDesk({ launch, layout, onSignedOut }: { launch: DeskLaunch | null
     return <div className="widget-msg"><p>This account can’t call from a desk. Ask an admin for staff access.</p><button type="button" className="link-button" onClick={signOut}>Sign out</button></div>;
   }
   if (!desk.ready) return <div className="widget-msg"><Loader2 className="qf-spin" /></div>;
-  if (layout === 'bar') return <DeskBar desk={desk} onSignOut={signOut} preferServicePointId={launch?.servicePointId ?? null} />;
-  if (!desk.desk) return <DeskPicker desk={desk} compact preferServicePointId={launch?.servicePointId ?? null} />;
+  if (layout === 'bar') return <DeskBar desk={desk} onSignOut={signOut} preferServicePointId={launch?.servicePointId ?? null} roomTypes={roomTypes} />;
+  if (!desk.desk) return <DeskPicker desk={desk} compact preferServicePointId={launch?.servicePointId ?? null} roomTypes={roomTypes} />;
 
   return (
     <>

@@ -722,7 +722,8 @@ paths:
         away. The desk then talks only to `returnOrigin` (see the desk
         protocol in v1.md section 6). Add `layout=bar` to `url` for the
         compact one-row layout, which posts `klargy:resize` with the frame
-        height it needs.
+        height it needs, and `roomTypes=consultation,triage` to offer only
+        those kinds of room in its room picker.
       requestBody:
         required: true
         content:

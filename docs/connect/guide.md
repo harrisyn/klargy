@@ -289,6 +289,8 @@ Without the package, listen for `message` events where `event.origin` is the lau
 
 For a floating toolbar rather than a panel, add `layout=bar` to the URL (or pass `layout: 'bar'` to `embedDesk`): the desk becomes one row about 60px tall and posts `klargy:resize` with the height it needs when a menu opens or closes; size the frame to it with `onResize`. To sign out, post `{type: 'klargy:logout'}` to that origin.
 
+To offer only the rooms that belong where the practitioner is working (consulting rooms in outpatients, reception desks at the front desk), add `roomTypes=consultation` to the URL (or pass `roomTypes: ['consultation']` to `embedDesk`), and when they move to another part of your app post `{type: 'klargy:room-types', roomTypes: ['reception']}` (or call `setRoomTypes`). The kinds are `reception`, `triage`, `consultation`, `cashier`, `pharmacy`, `lab`, `imaging` and `other`.
+
 ## 6. Serve patient lookup
 
 With a `lookupUrl`, Klargy asks your EMR who a patient is: at reception, on the desk while someone is being served, and (if the organisation requires an MR or member number) on the kiosk and join page. You search your records and run any cover check. Klargy shows the answer and doesn't store it.

@@ -7,18 +7,31 @@ import api from '@/api/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 import type { Desk, DeskInstance } from './useDesk';
 import { deskLabel } from './useDesk';
+import type { RoomType } from './connectBridge';
 import { confirmDialog } from '@/lib/dialog';
 
 interface LocationRow { id: string; name: string }
 
 export interface DeskRoomGroup { name: string; items: DeskInstance[] }
 
+/** The rooms of the given kinds (any kind when none are given). When none
+ * of the location's rooms is of those kinds, all of them, with
+ * `fallback` set, so a practitioner is never left with nowhere to sign in
+ * because rooms haven't been given a kind yet. */
+export function roomsOfTypes(instances: DeskInstance[], roomTypes: readonly RoomType[] = []): { items: DeskInstance[]; fallback: boolean } {
+  if (!roomTypes.length) return { items: instances, fallback: false };
+  const wanted = new Set(roomTypes.map((t) => t.toUpperCase()));
+  const items = instances.filter((i) => wanted.has(String(i.servicePointType || 'OTHER').toUpperCase()));
+  return items.length || !instances.length ? { items, fallback: false } : { items: instances, fallback: true };
+}
+
 /** The desks and rooms the practitioner can sign in to, grouped by
  * service, and signing in to one (asking before taking over someone's).
  * Shared by the picker and the bar layout of the desk widget. A host app
  * (Klargy Connect) can name the room to suggest: its location is opened and
- * its desks come first. */
-export function useDeskRooms(desk: Desk, preferServicePointId: string | null = null) {
+ * its desks come first; and the kinds of room to offer (e.g. only
+ * consulting rooms in its outpatient area). */
+export function useDeskRooms(desk: Desk, preferServicePointId: string | null = null, roomTypes: readonly RoomType[] = []) {
   const { user } = useAuthContext();
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [locationId, setLocationId] = useState('');
@@ -70,9 +83,15 @@ export function useDeskRooms(desk: Desk, preferServicePointId: string | null = n
     load(locationId);
   }, [locationId, load]);
 
+  const roomTypesKey = roomTypes.join(',');
+  const offered = useMemo(
+    () => roomsOfTypes(instances || [], roomTypesKey ? (roomTypesKey.split(',') as RoomType[]) : []),
+    [instances, roomTypesKey]
+  );
+
   const groups = useMemo<DeskRoomGroup[]>(() => {
     const byService = new Map<string, DeskRoomGroup>();
-    (instances || []).forEach((inst) => {
+    offered.items.forEach((inst) => {
       if (!inst.currentService) return;
       const g = byService.get(inst.currentService.id) || { name: inst.currentService.name, items: [] };
       g.items.push(inst);
@@ -82,7 +101,7 @@ export function useDeskRooms(desk: Desk, preferServicePointId: string | null = n
     if (!preferServicePointId) return groups;
     const hasPreferred = (g: DeskRoomGroup) => g.items.some((i) => i.servicePointId === preferServicePointId);
     return [...groups.filter(hasPreferred), ...groups.filter((g) => !hasPreferred(g))];
-  }, [instances, preferServicePointId]);
+  }, [offered, preferServicePointId]);
 
   // The first free (or already yours) desk of the suggested room.
   const suggestedId = useMemo(() => {
@@ -107,16 +126,20 @@ export function useDeskRooms(desk: Desk, preferServicePointId: string | null = n
     }
   };
 
-  return { userId: user?.id ?? null, locations, locationId, setLocationId, instances, groups, suggestedId, pending, problem, choose };
+  return {
+    userId: user?.id ?? null, locations, locationId, setLocationId, instances, groups, suggestedId, pending, problem, choose,
+    /** True when the host asked for kinds of room this location has none of, so every room is shown. */
+    typeFallback: offered.fallback,
+  };
 }
 
 export type DeskRooms = ReturnType<typeof useDeskRooms>;
 
 /** "Where are you working today?" Desks grouped by service, with the
  * suggested room's first free desk focused. */
-export default function DeskPicker({ desk, compact = false, preferServicePointId = null }: { desk: Desk; compact?: boolean; preferServicePointId?: string | null }) {
+export default function DeskPicker({ desk, compact = false, preferServicePointId = null, roomTypes = [] }: { desk: Desk; compact?: boolean; preferServicePointId?: string | null; roomTypes?: readonly RoomType[] }) {
   const { isAdmin } = useAuthContext();
-  const { userId, locations, locationId, setLocationId, instances, groups, suggestedId, pending, problem, choose } = useDeskRooms(desk, preferServicePointId);
+  const { userId, locations, locationId, setLocationId, instances, groups, suggestedId, pending, problem, choose, typeFallback } = useDeskRooms(desk, preferServicePointId, roomTypes);
   const suggested = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => { suggested.current?.focus(); }, [suggestedId]);
@@ -132,6 +155,7 @@ export default function DeskPicker({ desk, compact = false, preferServicePointId
         )}
       </div>
 
+      {typeFallback && <p className="desk-msg" role="status">None of the rooms here are the kind used in this area, so all rooms are shown.</p>}
       {instances === null ? (
         <div className="desk-picker-loading"><Loader2 className="qf-spin" size={20} /> Loading desks…</div>
       ) : groups.length === 0 ? (
