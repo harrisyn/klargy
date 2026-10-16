@@ -7,6 +7,7 @@ import './desk.css';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import ToastHost from '@/components/ui/ToastHost';
+import DialogHost from '@/components/ui/DialogHost';
 import { readRuntimeConfigFromEnv } from '@/lib/runtimeConfig';
 
 // Two families: Public Sans for UI/body (plain, highly legible - civic and
@@ -86,6 +87,7 @@ export default async function RootLayout({
           <SubscriptionProvider>
             {children}
             <ToastHost />
+            <DialogHost />
           </SubscriptionProvider>
         </AuthProvider>
       </body>

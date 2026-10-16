@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, CreditCard, Pencil, Trash2, Check, X } from 'lucide-react';
 import api from '@/api/client';
 import { Icon, PageHeader, Card, Badge, Button, Modal, Checkbox, Switch, Input, Textarea, Select } from '@/components/ui';
+import { confirmDialog } from '@/lib/dialog';
 
 interface SubscriptionPlan {
   id: string;
@@ -281,7 +282,7 @@ export default function PlansPage() {
   };
 
   const handleDelete = async (plan: SubscriptionPlan) => {
-    if (!confirm(`Delete "${plan.name}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ title: `Delete “${plan.name}”?`, message: 'This cannot be undone.', tone: 'danger' }))) return;
 
     try {
       await api.deleteSubscriptionPlan(plan.id);

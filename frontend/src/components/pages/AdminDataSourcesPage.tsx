@@ -9,6 +9,7 @@ import api from '@/api/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 import Layout from '@/components/Layout';
 import { Icon, PageHeader } from '@/components/ui';
+import { confirmDialog } from '@/lib/dialog';
 
 interface FieldMapping {
   id: string;
@@ -203,7 +204,7 @@ export default function AdminDataSourcesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this data source?')) return;
+    if (!(await confirmDialog({ title: 'Delete this data source?', tone: 'danger' }))) return;
     
     try {
       await api.deleteDataSource(id);

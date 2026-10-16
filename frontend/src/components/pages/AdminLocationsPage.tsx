@@ -9,6 +9,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import { useSubscription, UpgradePrompt } from '@/contexts/SubscriptionContext';
 import Layout from '@/components/Layout';
 import { Icon, PageHeader } from '@/components/ui';
+import { confirmDialog } from '@/lib/dialog';
 
 interface Location {
   id: string;
@@ -143,7 +144,7 @@ export default function AdminLocationsPage() {
   };
 
   const handleDeleteLocation = async (locId: string) => {
-    if (!confirm('Are you sure you want to delete this location? This will also delete all services and queues associated with it.')) {
+    if (!(await confirmDialog({ title: 'Delete this location?', message: 'This also deletes all of its services and queues.', tone: 'danger' }))) {
       return;
     }
 

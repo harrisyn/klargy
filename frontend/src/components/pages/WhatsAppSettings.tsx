@@ -13,6 +13,7 @@ import {
   providerSpec,
   type WhatsAppProviderId,
 } from '@/lib/whatsapp';
+import { confirmDialog } from '@/lib/dialog';
 
 interface Form {
   provider: WhatsAppProviderId;
@@ -355,8 +356,8 @@ export default function WhatsAppSettings({ organizationId, allowed, person }: { 
         <span role="status">{dirty ? 'You have unsaved changes.' : info?.configured ? 'All changes saved.' : 'Not set up yet.'}</span>
         <div className="wa-bar-actions">
           {info?.configured && (
-            <Button type="button" variant="ghost" disabled={busy !== ''} onClick={() => {
-              if (!window.confirm('Remove WhatsApp? Messages go back to email and text only.')) return;
+            <Button type="button" variant="ghost" disabled={busy !== ''} onClick={async () => {
+              if (!(await confirmDialog({ title: 'Remove WhatsApp?', message: 'Messages go back to email and text only.', confirmLabel: 'Remove', tone: 'danger' }))) return;
               run('remove', async () => {
                 apply(await api.deleteWhatsApp(organizationId));
                 setAvailable(null);

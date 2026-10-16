@@ -7,6 +7,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import { useSubscription, UpgradePrompt } from '@/contexts/SubscriptionContext';
 import Layout from '@/components/Layout';
 import { Button, PageHeader } from '@/components/ui';
+import { confirmDialog } from '@/lib/dialog';
 
 /**
  * The team: who has access and what they can do, plus invites waiting to
@@ -91,7 +92,7 @@ export default function AdminInvitesPage() {
   };
 
   const revoke = async (inv: Invite) => {
-    if (!window.confirm(`Cancel the invite${inv.email ? ` for ${inv.email}` : ''}? The link will stop working.`)) return;
+    if (!(await confirmDialog({ title: `Cancel the invite${inv.email ? ` for ${inv.email}` : ''}?`, message: 'The link will stop working.', confirmLabel: 'Cancel invite', cancelLabel: 'Keep it', tone: 'danger' }))) return;
     try {
       await api.revokeInvite(inv.id);
       setInvites((list) => list.filter((i) => i.id !== inv.id));
@@ -101,7 +102,7 @@ export default function AdminInvitesPage() {
   };
 
   const change = async (m: Member, patch: { role?: string; isActive?: boolean }) => {
-    if (patch.isActive === false && !window.confirm(`Remove ${m.firstName}’s access? They won’t be able to sign in. You can restore it later.`)) return;
+    if (patch.isActive === false && !(await confirmDialog({ title: `Remove ${m.firstName}’s access?`, message: 'They won’t be able to sign in. You can restore it later.', confirmLabel: 'Remove access', tone: 'danger' }))) return;
     const before = members;
     setMembers((list) => list?.map((x) => (x.id === m.id ? { ...x, ...patch } : x)) || null);
     try {
