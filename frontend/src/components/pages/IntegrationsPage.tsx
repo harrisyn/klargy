@@ -8,6 +8,7 @@ import Layout from '@/components/Layout';
 import { Badge, Button, Checkbox, EmptyState, Input, Modal, PageHeader, Switch } from '@/components/ui';
 import { apiErrorMessage } from '@/components/auth/AuthShell';
 import EmrConnectionsPanel from './EmrConnectionsPanel';
+import { confirmDialog } from '@/lib/dialog';
 
 const EVENT_LABELS: Record<string, string> = {
   'entry.joined': 'Someone joined a queue',
@@ -227,17 +228,21 @@ export default function IntegrationsPage() {
     setEndpoints((list) => list.map((x) => (x.id === e.id ? { ...x, ...updated } : x)));
   });
 
-  const rotate = (e: WebhookEndpoint) => run(e.id, async () => {
-    if (!window.confirm('Create a new signing secret? The old one stops working immediately.')) return;
-    const r = await api.rotateWebhookSecret(e.id);
-    setSecret(r.secret);
-  });
+  const rotate = async (e: WebhookEndpoint) => {
+    if (!(await confirmDialog({ title: 'Create a new signing secret?', message: 'The old one stops working immediately.', confirmLabel: 'Create secret' }))) return;
+    await run(e.id, async () => {
+      const r = await api.rotateWebhookSecret(e.id);
+      setSecret(r.secret);
+    });
+  };
 
-  const remove = (e: WebhookEndpoint) => run(e.id, async () => {
-    if (!window.confirm(`Delete the endpoint ${e.url}? Deliveries to it stop straight away.`)) return;
-    await api.deleteWebhook(e.id);
-    setEndpoints((list) => list.filter((x) => x.id !== e.id));
-  });
+  const remove = async (e: WebhookEndpoint) => {
+    if (!(await confirmDialog({ title: 'Delete this endpoint?', message: `Deliveries to ${e.url} stop straight away.`, tone: 'danger' }))) return;
+    await run(e.id, async () => {
+      await api.deleteWebhook(e.id);
+      setEndpoints((list) => list.filter((x) => x.id !== e.id));
+    });
+  };
 
   return (
     <Layout>

@@ -9,6 +9,7 @@ import Layout from '@/components/Layout';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { Icon, PageHeader } from '@/components/ui';
 import type { ServicePoint, ServicePointType } from '@/types';
+import { confirmDialog } from '@/lib/dialog';
 
 const SERVICE_POINT_TYPES: { value: ServicePointType; label: string; icon: LucideIcon }[] = [
   { value: 'RECEPTION', label: 'Reception', icon: Building2 },
@@ -111,7 +112,7 @@ const ServicePointsPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this service point?')) return;
+    if (!(await confirmDialog({ title: 'Delete this service point?', tone: 'danger' }))) return;
 
     try {
       await api.deleteServicePoint(id);

@@ -1,16 +1,20 @@
 # Production: run the image built by .github/workflows/docker-publish.yml.
-# Copy .env.example (or set these in your host/orchestrator) and run:
+# Copy .env.example to .env, fill it in (see docs/DEPLOYMENT.md), then:
 #   docker compose -f docker-compose.prod.yml up -d
 # Postgres and SMTP are external. The container applies migrations on start.
-# Public settings (APP_NAME, APP_DOMAIN, REALTIME_PUBLIC_*) are read at runtime, so the same
-# image works for any domain. Soketi provides real-time (swap for Pusher/Ably
-# by dropping the service and pointing the REALTIME_* variables at them).
+# Everything in .env is passed to the app (optional integrations such as
+# Twilio, AI keys and Vercel domains included); the entries below only add
+# required-variable checks and the Soketi wiring. Public settings (APP_NAME,
+# APP_DOMAIN, REALTIME_PUBLIC_*) are read at runtime, so the same image works
+# for any domain. Soketi provides real-time (swap for Pusher/Ably by dropping
+# the service and pointing the REALTIME_* variables at them).
 services:
   app:
     image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME}/queue-management:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "3000:3000"
+    env_file: .env
     environment:
       DATABASE_URL: ${DATABASE_URL:?}
       JWT_SECRET: ${JWT_SECRET:?}
@@ -18,16 +22,10 @@ services:
       CRON_SECRET: ${CRON_SECRET:?}
       APP_URL: ${APP_URL:?}
       APP_DOMAIN: ${APP_DOMAIN:?}
-      APP_NAME: ${APP_NAME:-Klargy}
       SMTP_HOST: ${SMTP_HOST:?}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_SECURE: ${SMTP_SECURE:-false}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-}
-      # Real-time via the Soketi service below. The server publishes over the
-      # internal network; browsers connect to the public host/port/TLS, so
-      # expose or proxy soketi (6001) and set REALTIME_PUBLIC_HOST.
+      # The server publishes to Soketi over the internal network; browsers
+      # connect to the public host/port/TLS, so expose or proxy soketi (6001)
+      # and set REALTIME_PUBLIC_HOST.
       REALTIME_APP_ID: ${REALTIME_APP_ID:?}
       REALTIME_KEY: ${REALTIME_KEY:?}
       REALTIME_SECRET: ${REALTIME_SECRET:?}
@@ -35,8 +33,6 @@ services:
       REALTIME_PORT: "6001"
       REALTIME_TLS: "false"
       REALTIME_PUBLIC_HOST: ${REALTIME_PUBLIC_HOST:?}
-      REALTIME_PUBLIC_PORT: ${REALTIME_PUBLIC_PORT:-443}
-      REALTIME_PUBLIC_TLS: ${REALTIME_PUBLIC_TLS:-true}
     depends_on:
       - soketi
 

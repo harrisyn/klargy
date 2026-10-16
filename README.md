@@ -26,13 +26,16 @@ docker compose up
 | http://admin.localhost:8003 | Superadmin panel |
 | http://localhost:9025 | Mailpit (catches all outgoing email) |
 
-Migrations run automatically when the app container starts. To create a
-superadmin: `docker exec qms-app node scripts/create-superadmin.js`.
+Migrations run automatically when the app container starts. On a fresh
+database the first screen is `/setup`, where you create the superadmin with the
+setup token printed in the app log (`docker compose logs app`) or set as
+`SETUP_TOKEN`.
 
-Settings for Docker go in the repo-root `.env` (see `.env.example`). Without
-Docker: `cd frontend && npm install && npm run dev` (needs a `.env` based on
-`frontend/.env.example`; set `APP_URL=http://localhost:3000` there, or leave it
-empty in development and links follow the address you open).
+Configuration: copy `.env.example` to `.env` (Docker, repo root) or to
+`frontend/.env` (no Docker: `cd frontend && npm install && npm run dev`, with
+`APP_URL=http://localhost:3000`). It is the only env template; every value has a
+development default. To deploy (Vercel or Docker), including all URLs, required
+variables and superadmin setup, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Layout
 
@@ -42,7 +45,7 @@ frontend/
   src/components/     UI components (ui/ is the shared design-system layer)
   src/server/         The API: Express routes, controllers, services, Prisma access
   src/pages/api/v1/   Mounts the API at /api/v1 inside Next.js
-  src/middleware.ts   Tenant resolution (subdomain / custom domain -> org)
+  src/proxy.ts        Tenant resolution (subdomain / custom domain -> org)
   prisma/             Schema and migrations
 tests/                End-to-end smoke scripts (run inside the app container)
 packages/connect/     @klargy/connect: TypeScript SDK for Klargy Connect (standalone package)

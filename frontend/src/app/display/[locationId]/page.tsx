@@ -1,7 +1,7 @@
 'use client';
 
 import QrCode from '@/components/QrCode';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { LayoutGrid, Users, Sun, Moon, Volume2, VolumeX, Maximize, Minimize, ChevronLeft } from 'lucide-react';
 import api from '@/api/client';
@@ -57,6 +57,22 @@ type ViewMode = 'services' | 'desks' | 'single';
 /** "Dr Owusu, Consulting Room 3": who's seeing them, when known, and where. */
 const whereWith = (staffName: string | null | undefined, where: string | null | undefined) =>
   [staffName, where].filter(Boolean).join(', ');
+
+type FullscreenTarget = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitFullscreenEnabled?: boolean;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+
+const fullscreenElement = () => document.fullscreenElement ?? (document as FullscreenDocument).webkitFullscreenElement ?? null;
+/** False on iPhone, which can't put a page full screen. */
+const fullscreenSupported = () => {
+  const doc = document as FullscreenDocument;
+  return !!(doc.fullscreenEnabled || doc.webkitFullscreenEnabled);
+};
+
+const noSubscribe = () => () => {};
 
 const DEFAULT_CONFIG: DisplayConfig = {
   ticker: { enabled: false, messages: [], speed: 'normal' },
@@ -171,6 +187,7 @@ export default function TVDisplayPage() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const canFullscreen = useSyncExternalStore(noSubscribe, fullscreenSupported, () => false);
   const [controlsVisible, setControlsVisible] = useState(true);
 
   const [flash, setFlash] = useState<Call | null>(null);
@@ -388,14 +405,26 @@ export default function TVDisplayPage() {
   // ---- chrome ----
 
   const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) containerRef.current?.requestFullscreen?.();
-    else document.exitFullscreen?.();
+    // Older Safari and many TV browsers only have the webkit-prefixed API.
+    const doc = document as FullscreenDocument;
+    if (fullscreenElement()) {
+      void Promise.resolve((document.exitFullscreen ?? doc.webkitExitFullscreen)?.call(document)).catch(() => {});
+      return;
+    }
+    const request = (el: FullscreenTarget | null) =>
+      el ? Promise.resolve((el.requestFullscreen ?? el.webkitRequestFullscreen)?.call(el)) : Promise.reject();
+    // Some browsers refuse an element but allow the whole page.
+    request(containerRef.current).catch(() => request(document.documentElement)).catch(() => {});
   }, []);
 
   useEffect(() => {
-    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    const onChange = () => setIsFullscreen(!!fullscreenElement());
     document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
   }, []);
 
   // Controls and cursor fade out when nobody's touching the screen.
@@ -655,9 +684,11 @@ export default function TVDisplayPage() {
         <button type="button" aria-pressed={audioEnabled} onClick={() => setAudioEnabled(!audioEnabled)} title={audioEnabled ? 'Mute announcements and video' : 'Turn on announcements and video sound'}>
           {audioEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
         </button>
-        <button type="button" onClick={toggleFullscreen} title={isFullscreen ? 'Exit full screen' : 'Full screen'}>
-          {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
-        </button>
+        {canFullscreen && (
+          <button type="button" onClick={toggleFullscreen} title={isFullscreen ? 'Exit full screen' : 'Full screen'}>
+            {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+          </button>
+        )}
       </div>
     </div>
   );

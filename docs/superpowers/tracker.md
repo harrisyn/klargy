@@ -66,7 +66,7 @@ Branch: `arch-review-fixes`. Origin: architecture review of 2026-09-25.
 - [x] `next build` passes (fixed nullable navigation hooks once a `pages/` dir exists)
 - [x] Checkout success/cancel URLs pointed at the root domain (users came back signed out); now return to the tenant origin
 - [x] Data-source router's router-level auth turned every unknown API path into a 401
-- [x] `create-superadmin.js` refuses default credentials in production
+- [x] No default superadmin credentials: first-run `/setup` page creates it, gated by a setup token (replaced create-superadmin.js)
 - [x] README rewritten for the single-app layout
 
 ## Batch 4: AI layer

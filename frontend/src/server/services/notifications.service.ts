@@ -117,7 +117,7 @@ export async function notifyEntry(
           service: {
             select: {
               name: true,
-              location: { select: { name: true, organization: { select: { id: true, name: true, slug: true, notificationSettings: true } } } },
+              location: { select: { name: true, organization: { select: { id: true, name: true, slug: true, logoUrl: true, primaryColor: true, hidePoweredBy: true, notificationSettings: true } } } },
             },
           },
         },
@@ -148,7 +148,33 @@ export async function notifyEntry(
   if (settings.email && isRealEmail(entry.user.email)) {
     const credit = await consumeCredits(org.id, 'EMAIL', 1, `queue notification ${type}`);
     if (credit.allowed) {
-      const sent = await sendNotificationEmail(entry.user.email, heading, message, org.name);
+      // The email carries the link as a button, so its text leaves it out.
+      const emailText = buildMessage(type, {
+        ticket: entry.ticketNumber,
+        service: entry.queue.service.name,
+        position: extra.position,
+        servicePoint: extra.servicePointName,
+        text: extra.text,
+      }).message;
+      const sent = await sendNotificationEmail(entry.user.email, heading, emailText, {
+        brand: org,
+        eyebrow: 'Queue update',
+        board: {
+          label: type === 'NOW_SERVING' ? 'Now serving' : 'Your ticket',
+          value: entry.ticketNumber,
+          caption: entry.queue.service.name,
+          side:
+            type === 'NOW_SERVING' && extra.servicePointName
+              ? { label: 'Please go to', value: extra.servicePointName }
+              : type === 'QUEUE_DELAYED'
+                ? { label: 'Status', value: 'Paused' }
+                : extra.position
+                  ? { label: 'Your place', value: `${extra.position}` }
+                  : undefined,
+        },
+        action: { href: statusUrl, label: type === 'NOW_SERVING' ? 'View your ticket' : 'Track your place' },
+        reason: `You're receiving this because you joined a queue at ${org.name}.`,
+      });
       if (sent.success) {
         await prisma.notification.create({
           data: { userId: entry.user.id, type, channel: 'EMAIL', message, queueEntryId: entry.id, readAt: new Date() },

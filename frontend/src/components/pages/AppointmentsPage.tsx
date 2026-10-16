@@ -9,6 +9,7 @@ import Layout from '@/components/Layout';
 import { Badge, Button, EmptyState, Input, Modal, PageHeader, Select, Textarea } from '@/components/ui';
 import type { BadgeTone } from '@/components/ui';
 import { apiErrorMessage } from '@/components/auth/AuthShell';
+import { confirmDialog } from '@/lib/dialog';
 
 interface LocationOption { id: string; name: string }
 interface ServiceOption { id: string; name: string; locationId: string; isActive: boolean }
@@ -352,7 +353,7 @@ export default function AppointmentsPage() {
   };
 
   const cancel = async (a: Appointment) => {
-    if (!window.confirm(`Cancel ${a.user.firstName} ${a.user.lastName}'s appointment at ${formatTime(a.startTime)}?`)) return;
+    if (!(await confirmDialog({ title: 'Cancel this appointment?', message: `${a.user.firstName} ${a.user.lastName}'s appointment at ${formatTime(a.startTime)} will be cancelled.`, confirmLabel: 'Cancel appointment', cancelLabel: 'Keep it', tone: 'danger' }))) return;
     setBusyId(a.id);
     try {
       replace(await api.cancelAppointment(a.id));

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractSubdomain, extractCustomDomainCandidate, buildAdminUrl } from '@/lib/subdomain';
 import prisma from '@/server/lib/prisma';
 import { deskFrameAncestors, isDeskPath } from '@/lib/deskEmbed';
+import { needsSetup, announceSetupToken } from '@/server/services/setup.service';
 
 // Next 16 "proxy" (formerly middleware). Always runs on the Node.js
 // runtime, so it can read the tenant straight from the database.
@@ -79,6 +80,16 @@ export async function proxy(req: NextRequest) {
   const host = req.headers.get('host') || '';
   const subdomain = extractSubdomain(host);
   const { pathname } = req.nextUrl;
+
+  // Fresh install (no superadmin yet): every page leads to /setup, and /setup
+  // closes once the superadmin exists. A database error never blocks the app.
+  const setupOpen = await needsSetup().catch(() => false);
+  if (setupOpen) {
+    void announceSetupToken();
+    if (pathname !== '/setup') return NextResponse.redirect(new URL('/setup', req.url));
+    return NextResponse.next();
+  }
+  if (pathname === '/setup') return NextResponse.redirect(new URL(buildAdminUrl('/login')));
 
   // Root domain / www: block direct /superadmin access from here. Before
   // falling back to that, check whether this host is a verified custom

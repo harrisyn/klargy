@@ -61,7 +61,7 @@ router.all('/daily', async (_req, res, next) => {
 
     const orgs = await prisma.organization.findMany({
       where: { aiEnabled: true, status: 'ACTIVE' },
-      select: { id: true, name: true, slug: true },
+      select: { id: true, name: true, slug: true, logoUrl: true, primaryColor: true, hidePoweredBy: true },
     });
     let digests = 0;
     for (const org of orgs) {
@@ -75,9 +75,12 @@ router.all('/daily', async (_req, res, next) => {
         });
         const link = buildAppUrl('/analytics', org.slug);
         for (const admin of admins) {
-          await sendNotificationEmail(admin.email, `${org.name}: yesterday at a glance`, `${digest.answer}
-
-More detail: ${link}`, org.name);
+          await sendNotificationEmail(admin.email, `${org.name}: yesterday at a glance`, digest.answer, {
+            brand: org,
+            eyebrow: 'Daily digest',
+            action: { href: link, label: 'Open analytics' },
+            reason: `You're receiving this daily digest as an admin of ${org.name}.`,
+          });
         }
       } catch (error) {
         console.error(`Digest failed for org ${org.id}:`, error);

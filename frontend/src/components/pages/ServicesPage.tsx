@@ -14,6 +14,7 @@ import { AddServiceWizard } from '@/components/services/AddServiceWizard';
 import type { WizardData } from '@/components/services/wizardTypes';
 import { ServicePointsDeskPicker } from '@/components/services/ServicePointsDeskPicker';
 import type { WizardServicePoint } from '@/components/services/wizardTypes';
+import { confirmDialog } from '@/lib/dialog';
 
 interface ServicePoint {
   id: string;
@@ -186,7 +187,7 @@ const ServicesPage: React.FC = () => {
   };
 
   const handleDeleteService = async (serviceId: string) => {
-    if (!confirm('Are you sure you want to delete this service? This will also delete all associated queues.')) {
+    if (!(await confirmDialog({ title: 'Delete this service?', message: 'This also deletes all of its queues.', tone: 'danger' }))) {
       return;
     }
 
