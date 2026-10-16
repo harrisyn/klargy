@@ -3,6 +3,7 @@ import prisma from '../lib/prisma';
 import { emitToQueue, SOCKET_EVENTS } from '../lib/realtime';
 import { getStartOfDay, getEndOfDay, isDayActive, startOfLocalDate, validTimeZone } from '../utils/date';
 import { serviceTimeZone } from '../services/queueEvents.service';
+import { bookedArrivalSettings, bookedFields } from '../services/bookedArrival.service';
 import { generateTicketNumber, getNextSequence } from '../utils/ticket';
 import { listScopeOrgId, loadCaller } from '../middleware/tenantScope.middleware';
 import {
@@ -308,15 +309,24 @@ export const checkInAppointment = async (req: Request, res: Response, next: Next
     const sequence = await getNextSequence(prisma, queue.id);
     const ticketNumber = generateTicketNumber(service.name.charAt(0).toUpperCase(), sequence);
     const lastEntry = await prisma.queueEntry.findFirst({ where: { queueId: queue.id }, orderBy: { sortOrder: 'desc' } });
+    const organizationId = (await prisma.service.findUnique({
+      where: { id: queue.serviceId },
+      select: { location: { select: { organizationId: true } } },
+    }))?.location.organizationId;
+    const settings = organizationId ? await bookedArrivalSettings(organizationId) : null;
 
     const entry = await prisma.queueEntry.create({
       data: {
         queueId: queue.id,
         userId: appointment.userId,
         ticketNumber,
-        priority: 1, // Booked patients go ahead of walk-ins
+        // Booked patients arriving on time are placed by their booked time
+        // among walk-ins (queueOrder.ts); late ones join as walk-ins. With
+        // that setting off, booked patients go ahead of walk-ins as before.
+        priority: settings?.enabled ? 0 : 1,
         sortOrder: (lastEntry?.sortOrder || 0) + 1,
         notes: 'Appointment check-in',
+        ...(settings ? bookedFields(appointment, settings) : {}),
       },
       include: { user: { select: { id: true, firstName: true, lastName: true } } },
     });

@@ -17,7 +17,12 @@ vi.mock('../lib/prisma', () => ({
     externalReference: { findMany: vi.fn() },
   },
 }));
-vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false }, notifyEntry: vi.fn(), notifyPositions: vi.fn() }));
+vi.mock('./notifications.service', () => ({ WAITING_ORDER: [], CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false }, notifyEntry: vi.fn(), notifyPositions: vi.fn(),
+  queueLineRanks: vi.fn(async (queueId: string) => {
+    const { default: db } = await import('../lib/prisma');
+    const rows = ((await (db as any).queueEntry.findMany({ where: { queueId, status: 'WAITING', heldAt: null, awaitingClearance: false }, select: { id: true } })) ?? []) as { id: string }[];
+    return new Map(rows.map((e, i) => [e.id, i + 1]));
+  }), }));
 vi.mock('../lib/realtime', () => ({ emitToQueue: vi.fn(), emitToLocation: vi.fn(), SOCKET_EVENTS: {} }));
 
 import prisma from '../lib/prisma';

@@ -2,9 +2,9 @@
 // ./providers translates these to and from its vendor's API, so the agent
 // loop, tools and prompts never depend on a particular LLM vendor.
 
-export type ProviderName = 'anthropic' | 'openai' | 'gemini' | 'openai_compatible';
+export type ProviderName = 'anthropic' | 'openai' | 'azure_openai' | 'gemini' | 'openai_compatible';
 
-export const PROVIDER_NAMES: ProviderName[] = ['anthropic', 'openai', 'gemini', 'openai_compatible'];
+export const PROVIDER_NAMES: ProviderName[] = ['anthropic', 'openai', 'azure_openai', 'gemini', 'openai_compatible'];
 
 /** JSON Schema (object) describing a tool's arguments. */
 export interface JsonSchema {
@@ -54,13 +54,17 @@ export interface ChatResult {
   toolCalls: ToolCall[];
   stop: StopReason;
   model: string;
-  usage: { inputTokens: number; outputTokens: number };
+  // outputTokens includes any reasoning tokens; the optional breakdowns are
+  // informational (providers that don't report them leave them out).
+  usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number; cachedInputTokens?: number };
   raw?: unknown;
 }
 
 export interface LlmProvider {
   name: ProviderName;
   model: string;
+  /** Which vendor API this adapter speaks, for diagnostics (e.g. "responses"). */
+  api?: string;
   chat(request: ChatRequest): Promise<ChatResult>;
 }
 
@@ -69,6 +73,10 @@ export interface ProviderSettings {
   apiKey: string;
   model?: string | null;
   baseUrl?: string | null;
+  /** OpenAI-family reasoning effort (none | minimal | low | medium | high | xhigh); unset = model default. */
+  reasoningEffort?: string | null;
+  /** Per-request timeout for HTTP adapters, in ms. */
+  timeoutMs?: number | null;
 }
 
 export class AiProviderError extends Error {

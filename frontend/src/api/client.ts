@@ -78,10 +78,57 @@ export interface Appointment {
   slot: { id: string; startTime: string; endTime: string } | null;
 }
 
+/** Booked patients arriving on time are placed by their booked time. */
+export interface BookedArrivalSettings {
+  enabled: boolean;
+  earlyMinutes: number;
+  lateMinutes: number;
+  /** Percent: at most this share of those placed ahead of a walk-in are booked patients who arrived after them. */
+  maxBookedShare: number;
+}
+
 export interface NotificationSettings {
   turnApproachingAt: number;
   email: boolean;
   sms: boolean;
+}
+
+export interface WhatsAppTemplateMappingInfo {
+  name: string;
+  language: string;
+  status?: string;
+  variables: string[];
+  contentSid?: string;
+  category?: string;
+}
+
+export interface WhatsAppSettingsInfo {
+  configured: boolean;
+  webhookUrl: string;
+  provider?: string;
+  isEnabled?: boolean;
+  settings?: Record<string, string>;
+  secretsMasked?: Record<string, string | null>;
+  verifyToken?: string | null;
+  webhookSecret?: string | null;
+  templates?: Record<string, WhatsAppTemplateMappingInfo>;
+  fallbackToSms?: boolean;
+  consentMode?: 'EXPLICIT' | 'IMPLIED';
+  defaultCountryCode?: string | null;
+  lastTestedAt?: string | null;
+  lastTestOk?: boolean | null;
+  lastTestMessage?: string | null;
+  contacts?: { optedIn: number; optedOut: number };
+}
+
+export interface WhatsAppProviderTemplate {
+  name: string;
+  language: string;
+  status: string;
+  category?: string;
+  body?: string;
+  paramCount: number;
+  contentSid?: string;
 }
 
 export interface WebhookEndpoint {
@@ -173,7 +220,7 @@ export interface WaitAlert {
 }
 
 export interface AiProviderConfig {
-  provider: 'anthropic' | 'openai' | 'gemini' | 'openai_compatible';
+  provider: 'anthropic' | 'openai' | 'azure_openai' | 'gemini' | 'openai_compatible';
   configured: boolean;
   isActive: boolean;
   model: string | null;
@@ -581,6 +628,48 @@ class ApiClient {
 
   async deleteCustomDomain(organizationId: string) {
     await this.client.delete(`/orgs/${organizationId}/custom-domain`);
+  }
+
+  async getWhatsApp(organizationId: string) {
+    const { data } = await this.client.get(`/orgs/${organizationId}/whatsapp`);
+    return data as WhatsAppSettingsInfo;
+  }
+
+  async saveWhatsApp(
+    organizationId: string,
+    body: {
+      provider: string;
+      isEnabled: boolean;
+      settings: Record<string, string>;
+      secrets: Record<string, string>;
+      templates: Record<string, WhatsAppTemplateMappingInfo>;
+      fallbackToSms: boolean;
+      consentMode: 'EXPLICIT' | 'IMPLIED';
+      defaultCountryCode: string;
+    }
+  ) {
+    const { data } = await this.client.put(`/orgs/${organizationId}/whatsapp`, body);
+    return data as WhatsAppSettingsInfo;
+  }
+
+  async deleteWhatsApp(organizationId: string) {
+    const { data } = await this.client.delete(`/orgs/${organizationId}/whatsapp`);
+    return data as WhatsAppSettingsInfo;
+  }
+
+  async testWhatsApp(organizationId: string) {
+    const { data } = await this.client.post(`/orgs/${organizationId}/whatsapp/test`);
+    return data as { ok: boolean; message: string };
+  }
+
+  async sendWhatsAppTest(organizationId: string, to: string) {
+    const { data } = await this.client.post(`/orgs/${organizationId}/whatsapp/send-test`, { to });
+    return data as { ok: true; via: 'text' | 'template'; messageId: string | null };
+  }
+
+  async syncWhatsAppTemplates(organizationId: string) {
+    const { data } = await this.client.post(`/orgs/${organizationId}/whatsapp/templates/sync`);
+    return data as { available: WhatsAppProviderTemplate[]; templates: Record<string, WhatsAppTemplateMappingInfo> };
   }
 
   async getUsers(params?: { organizationId?: string; role?: string }) {
@@ -1141,8 +1230,12 @@ class ApiClient {
     return data;
   }
 
-  async testAiProvider(provider: string): Promise<{ ok: boolean; model?: string; reply?: string; error?: string }> {
-    const { data } = await this.client.post(`/superadmin/ai-providers/${provider}/test`);
+  /** Tests the given (possibly unsaved) values; empty fields fall back to the saved config. */
+  async testAiProvider(
+    provider: string,
+    payload: { apiKey?: string; model?: string; baseUrl?: string } = {}
+  ): Promise<{ ok: boolean; model?: string; api?: string | null; latencyMs?: number; reply?: string; error?: string }> {
+    const { data } = await this.client.post(`/superadmin/ai-providers/${provider}/test`, payload);
     return data;
   }
 
@@ -1229,6 +1322,7 @@ class ApiClient {
     primaryColor?: string | null;
     hidePoweredBy?: boolean;
     notificationSettings?: NotificationSettings;
+    bookedArrivalSettings?: BookedArrivalSettings;
   }) {
     const { data } = await this.client.put(`/orgs/${id}`, payload);
     return data;

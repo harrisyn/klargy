@@ -1,12 +1,33 @@
 import type { AiMessage, ChatRequest, ChatResult, LlmProvider, ProviderSettings, StopReason, ToolCall } from '../types';
 import { AiProviderError } from '../types';
+import { postJson } from './http';
+import {
+  OPENAI_BASE_URL,
+  OPENAI_DEFAULT_MODEL,
+  azureChatUrl,
+  isReasoningModel,
+  normalizeEffort,
+  parseToolArgs,
+  toStrictSchema,
+} from './openaiCommon';
+import { responsesChat } from './openaiResponses';
 
-// OpenAI Chat Completions with function tools. The same wire format is spoken
-// by most other vendors (Mistral, xAI, Groq, DeepSeek, Together, OpenRouter,
-// Azure OpenAI, local vLLM/Ollama), so `openai_compatible` reuses this adapter
-// with a custom base URL.
+// OpenAI-family adapters. Which API each provider speaks:
+//
+// - openai (api.openai.com): the Responses API, OpenAI's recommended API for
+//   agents. It carries reasoning state between tool-calling turns (encrypted
+//   reasoning items) and is where new model features land first. Set
+//   OPENAI_API=chat to fall back to Chat Completions, e.g. behind a proxy that
+//   only speaks /chat/completions.
+// - azure_openai: Chat Completions against an Azure deployment, with the
+//   OpenAI-specific parameters (strict tools, parallel calls, reasoning effort,
+//   max_completion_tokens).
+// - openai_compatible (Mistral, xAI, Groq, DeepSeek, OpenRouter, vLLM,
+//   Ollama...): plain Chat Completions with the widely supported subset only
+//   (max_tokens, no strict/parallel flags), since those servers vary in what
+//   they accept.
 
-const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+type Flavor = 'openai' | 'azure' | 'compatible';
 
 type ChatMessage =
   | { role: 'system' | 'user'; content: string }
@@ -54,56 +75,126 @@ function mapStop(reason: string | undefined): StopReason {
   }
 }
 
-function safeParse(json: string): Record<string, unknown> {
-  try {
-    const value = JSON.parse(json || '{}');
-    return value && typeof value === 'object' ? value : {};
-  } catch {
-    return {};
-  }
+interface ChatConfig {
+  url: string;
+  headers: Record<string, string>;
+  model: string;
+  flavor: Flavor;
+  reasoningEffort: string | null;
+  timeoutMs?: number | null;
+  label: string;
 }
 
-export function createOpenAiProvider(settings: ProviderSettings, name: 'openai' | 'openai_compatible' = 'openai'): LlmProvider {
-  const baseUrl = (settings.baseUrl || OPENAI_BASE_URL).replace(/\/$/, '');
-  if (!settings.model) throw new AiProviderError(`Set a model name for the ${name} provider`, 400);
-  const model = settings.model;
+export function buildChatCompletionsBody(config: Pick<ChatConfig, 'model' | 'flavor' | 'reasoningEffort'>, request: ChatRequest): Record<string, unknown> {
+  const openAiParams = config.flavor !== 'compatible';
+  const maxTokens = request.maxTokens ?? 16000;
+  // Deployment names on Azure are arbitrary, so an explicitly configured
+  // effort is trusted there; elsewhere only reasoning models get one.
+  const effort = config.reasoningEffort && (config.flavor === 'azure' || isReasoningModel(config.model)) ? config.reasoningEffort : null;
 
+  return {
+    model: config.model,
+    messages: toChatMessages(request.system, request.messages),
+    ...(request.tools.length
+      ? {
+          tools: request.tools.map((t) => {
+            const strict = openAiParams ? toStrictSchema(t.parameters) : null;
+            return {
+              type: 'function',
+              function: { name: t.name, description: t.description, parameters: strict ?? t.parameters, ...(strict ? { strict: true } : {}) },
+            };
+          }),
+          ...(openAiParams ? { parallel_tool_calls: true } : {}),
+        }
+      : {}),
+    // Reasoning models reject max_tokens; OpenAI and Azure accept
+    // max_completion_tokens for every model. Compatible servers mostly only
+    // know max_tokens.
+    ...(openAiParams ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+    ...(effort ? { reasoning_effort: effort } : {}),
+  };
+}
+
+export function parseChatCompletionsResult(body: any, fallbackModel: string): ChatResult {
+  const choice = body?.choices?.[0];
+  const message = choice?.message ?? {};
+  const toolCalls: ToolCall[] = (message.tool_calls ?? [])
+    .filter((c: any) => c?.type === 'function' || c?.function)
+    .map((c: any) => ({ id: c.id, name: c.function.name, args: parseToolArgs(c.function.arguments) }));
+  const usage = body?.usage ?? {};
+
+  return {
+    text: typeof message.content === 'string' ? message.content.trim() : '',
+    toolCalls,
+    stop: message.refusal ? 'refusal' : mapStop(choice?.finish_reason),
+    model: body?.model || fallbackModel,
+    usage: {
+      inputTokens: usage.prompt_tokens ?? 0,
+      outputTokens: usage.completion_tokens ?? 0,
+      ...(usage.completion_tokens_details?.reasoning_tokens != null ? { reasoningTokens: usage.completion_tokens_details.reasoning_tokens } : {}),
+      ...(usage.prompt_tokens_details?.cached_tokens != null ? { cachedInputTokens: usage.prompt_tokens_details.cached_tokens } : {}),
+    },
+  };
+}
+
+async function chatCompletions(config: ChatConfig, request: ChatRequest): Promise<ChatResult> {
+  const body = await postJson(config.url, config.headers, buildChatCompletionsBody(config, request), {
+    label: config.label,
+    timeoutMs: config.timeoutMs,
+  });
+  return parseChatCompletionsResult(body, config.model);
+}
+
+export type OpenAiFamily = 'openai' | 'azure_openai' | 'openai_compatible';
+
+export function createOpenAiProvider(settings: ProviderSettings, name: OpenAiFamily = 'openai'): LlmProvider {
+  const effort = normalizeEffort(settings.reasoningEffort);
+  const timeoutMs = settings.timeoutMs;
+
+  if (name === 'azure_openai') {
+    if (!settings.baseUrl) throw new AiProviderError('Set the Azure OpenAI endpoint (base URL)', 400);
+    if (!settings.model) throw new AiProviderError('Set the Azure OpenAI deployment name as the model', 400);
+    const model = settings.model;
+    const url = azureChatUrl(settings.baseUrl, model);
+    const config: ChatConfig = { url, headers: { 'api-key': settings.apiKey }, model, flavor: 'azure', reasoningEffort: effort, timeoutMs, label: 'Azure OpenAI' };
+    return { name, model, api: 'chat_completions', chat: (request) => chatCompletions(config, request) };
+  }
+
+  if (name === 'openai_compatible') {
+    if (!settings.model) throw new AiProviderError('Set a model name for the openai_compatible provider', 400);
+    if (!settings.baseUrl) throw new AiProviderError('openai_compatible needs a base URL', 400);
+    const model = settings.model;
+    const baseUrl = settings.baseUrl.replace(/\/+$/, '');
+    const config: ChatConfig = {
+      url: `${baseUrl}/chat/completions`,
+      headers: { Authorization: `Bearer ${settings.apiKey}` },
+      model,
+      flavor: 'compatible',
+      reasoningEffort: effort,
+      timeoutMs,
+      label: 'The AI endpoint',
+    };
+    return { name, model, api: 'chat_completions', chat: (request) => chatCompletions(config, request) };
+  }
+
+  const model = settings.model || OPENAI_DEFAULT_MODEL;
+  const baseUrl = (settings.baseUrl || OPENAI_BASE_URL).replace(/\/+$/, '');
+  if ((process.env.OPENAI_API || '').toLowerCase() === 'chat') {
+    const config: ChatConfig = {
+      url: `${baseUrl}/chat/completions`,
+      headers: { Authorization: `Bearer ${settings.apiKey}` },
+      model,
+      flavor: 'openai',
+      reasoningEffort: effort,
+      timeoutMs,
+      label: 'OpenAI',
+    };
+    return { name, model, api: 'chat_completions', chat: (request) => chatCompletions(config, request) };
+  }
   return {
     name,
     model,
-    async chat(request: ChatRequest): Promise<ChatResult> {
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${settings.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: toChatMessages(request.system, request.messages),
-          tools: request.tools.map((t) => ({
-            type: 'function',
-            function: { name: t.name, description: t.description, parameters: t.parameters },
-          })),
-          max_completion_tokens: request.maxTokens ?? 16000,
-        }),
-      });
-      const body = (await res.json().catch(() => ({}))) as any;
-      if (!res.ok) {
-        const message = body?.error?.message || `HTTP ${res.status}`;
-        throw new AiProviderError(`${name} API error: ${message}`, res.status === 401 ? 400 : res.status === 429 ? 429 : 502);
-      }
-
-      const choice = body.choices?.[0];
-      const message = choice?.message ?? {};
-      const toolCalls: ToolCall[] = (message.tool_calls ?? [])
-        .filter((c: any) => c?.type === 'function' || c?.function)
-        .map((c: any) => ({ id: c.id, name: c.function.name, args: safeParse(c.function.arguments) }));
-
-      return {
-        text: typeof message.content === 'string' ? message.content.trim() : '',
-        toolCalls,
-        stop: message.refusal ? 'refusal' : mapStop(choice?.finish_reason),
-        model: body.model || model,
-        usage: { inputTokens: body.usage?.prompt_tokens ?? 0, outputTokens: body.usage?.completion_tokens ?? 0 },
-      };
-    },
+    api: 'responses',
+    chat: (request) => responsesChat({ baseUrl, apiKey: settings.apiKey, model, reasoningEffort: effort, timeoutMs }, request),
   };
 }

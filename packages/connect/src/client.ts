@@ -13,6 +13,7 @@ import type {
   CreateEntryResult,
   DeskLaunchInput,
   DeskLaunchResult,
+  StaffDesk,
   Entry,
   EntryAction,
   EntryActionInput,
@@ -292,6 +293,16 @@ export class KlargyConnect {
   /** `POST /desk/launch`: a one-time desk URL for the practitioner signed in to the EMR. Not retried. */
   async launchDesk(input: DeskLaunchInput): Promise<DeskLaunchResult> {
     return (await this.request<DeskLaunchResult>('POST', '/desk/launch', { body: input, retry: false })).body;
+  }
+
+  /**
+   * `GET /staff/{staffRef}/desk`: the room the staff member (the EMR's
+   * practitioner id) is signed in to now, or `servicePoint: null`. For
+   * checking a room without relying on `servicepoint.opened` webhooks.
+   * Throws `STAFF_NOT_MAPPED` (404) for a practitioner Klargy doesn't know.
+   */
+  async getStaffDesk(staffRef: string): Promise<StaffDesk> {
+    return (await this.request<StaffDesk>('GET', `/staff/${seg(staffRef)}/desk`, { retry: true })).body;
   }
 
   // -------------------------------------------------------------------------

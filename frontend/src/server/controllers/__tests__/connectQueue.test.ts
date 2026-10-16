@@ -27,6 +27,7 @@ vi.mock('../../lib/prisma', () => ({
     servicePointService: { findFirst: vi.fn() },
     servicePointInstance: { findMany: vi.fn().mockResolvedValue([]) },
     appointment: { findFirst: vi.fn(), updateMany: vi.fn() },
+    organization: { findUnique: vi.fn().mockResolvedValue(null) },
   },
 }));
 
@@ -55,6 +56,11 @@ vi.mock('../../services/notifications.service', () => ({
   CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false },
   notifyEntry: vi.fn().mockResolvedValue(undefined),
   notifyPositions: vi.fn(),
+  queueLineRanks: vi.fn(async (queueId: string) => {
+    const { default: db } = await import('../../lib/prisma');
+    const rows = ((await (db as any).queueEntry.findMany({ where: { queueId, status: 'WAITING', heldAt: null, awaitingClearance: false }, select: { id: true } })) ?? []) as { id: string }[];
+    return new Map(rows.map((e, i) => [e.id, i + 1]));
+  }),
 }));
 
 vi.mock('../../services/queueEvents.service', async (importOriginal) => ({
@@ -652,11 +658,14 @@ describe('phase 5: by-ref service selector, transfer and priority', () => {
 describe('POST /entries with refs.appointment', () => {
   it('checks the known appointment in and announces it', async () => {
     refs.push({ resourceType: 'appointment', resourceId: 'a1', externalId: 'APT1' });
-    (prisma.appointment.findFirst as any).mockResolvedValue({ id: 'a1', userId: 'u1' });
+    const startTime = new Date(Date.now() + 5 * 60 * 1000);
+    (prisma.appointment.findFirst as any).mockResolvedValue({ id: 'a1', userId: 'u1', startTime });
     (prisma.appointment.updateMany as any).mockResolvedValue({ count: 1 });
     const res = makeRes();
     await postEntry(makeReq({ body: { ...body, refs: { ...body.refs, appointment: 'APT1' } } }), res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(201);
+    // Five minutes early is on time: placed in line by the booked time.
+    expect((joinQueueEntry as any).mock.calls[0][1].booked).toEqual({ appointmentId: 'a1', bookedFor: startTime, bookedPlaceAt: startTime });
     expect((prisma.appointment.updateMany as any).mock.calls[0][0]).toMatchObject({
       where: { id: 'a1', status: { in: ['SCHEDULED', 'CONFIRMED'] } },
       data: { status: 'CHECKED_IN' },
@@ -671,6 +680,26 @@ describe('POST /entries with refs.appointment', () => {
     await postEntry(makeReq({ body: { ...body, refs: { ...body.refs, appointment: 'APT9' } } }), res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(201);
     expect(prisma.appointment.updateMany).not.toHaveBeenCalled();
+    expect((joinQueueEntry as any).mock.calls[0][1].booked).toBeNull();
+  });
+
+  it('places a late arrival as a walk-in, and keeps the booked time for the chip', async () => {
+    refs.push({ resourceType: 'appointment', resourceId: 'a1', externalId: 'APT1' });
+    const startTime = new Date(Date.now() - 40 * 60 * 1000);
+    (prisma.appointment.findFirst as any).mockResolvedValue({ id: 'a1', userId: 'u1', startTime });
+    (prisma.appointment.updateMany as any).mockResolvedValue({ count: 1 });
+    await postEntry(makeReq({ body: { ...body, refs: { ...body.refs, appointment: 'APT1' } } }), makeRes(), vi.fn());
+    expect((joinQueueEntry as any).mock.calls[0][1].booked).toEqual({ appointmentId: 'a1', bookedFor: startTime, bookedPlaceAt: null });
+  });
+
+  it('places nobody by booked time when the organisation switched it off', async () => {
+    refs.push({ resourceType: 'appointment', resourceId: 'a1', externalId: 'APT1' });
+    (prisma.organization.findUnique as any).mockResolvedValueOnce({ bookedArrivalSettings: { enabled: false } });
+    const startTime = new Date();
+    (prisma.appointment.findFirst as any).mockResolvedValue({ id: 'a1', userId: 'u1', startTime });
+    (prisma.appointment.updateMany as any).mockResolvedValue({ count: 1 });
+    await postEntry(makeReq({ body: { ...body, refs: { ...body.refs, appointment: 'APT1' } } }), makeRes(), vi.fn());
+    expect((joinQueueEntry as any).mock.calls[0][1].booked.bookedPlaceAt).toBeNull();
   });
 });
 

@@ -35,6 +35,9 @@ interface QueueStatus {
   entryId: string;
   joinedAt: string;
   calledAt: string | null;
+  /** A booked patient: their appointment time ("10:30", the location's
+   * clock) and whether they were placed in line by it. */
+  booked?: { at: string; time: string; placed: boolean } | null;
   userName: string;
   /** What we've sent the patient about this ticket, newest first. */
   messages?: { type: string; message: string; sentAt: string }[];
@@ -434,6 +437,14 @@ export default function QueueStatusPage({
             <span style={ticketNumber}>{status.ticketNumber}</span>
             {status.userName && (
               <span style={userName}>{status.userName}</span>
+            )}
+            {status.booked && (
+              <span
+                style={bookedChip}
+                title={status.booked.placed ? 'You arrived on time, so your place in line follows your booked time.' : undefined}
+              >
+                Booked {status.booked.time}
+              </span>
             )}
           </div>
 
@@ -1057,6 +1068,17 @@ const pausedBanner: React.CSSProperties = {
   fontSize: '14px',
   lineHeight: 1.5,
   textAlign: 'center',
+};
+
+const bookedChip: React.CSSProperties = {
+  display: 'inline-block',
+  marginTop: '0.5rem',
+  padding: '0.25rem 0.75rem',
+  borderRadius: '9999px',
+  fontSize: '0.8125rem',
+  fontWeight: 600,
+  background: 'rgba(100, 116, 139, 0.12)',
+  color: '#475569',
 };
 
 const statusBadgeContainer: React.CSSProperties = {

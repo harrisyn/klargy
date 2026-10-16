@@ -15,6 +15,7 @@ vi.mock('./notifications.service', () => ({
   WAITING_ORDER: [],
   CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false },
   computePosition: vi.fn(),
+  waitingLine: vi.fn(async () => []),
 }));
 vi.mock('./queueEvents.service', () => ({
   recordQueueEvent: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('./queueEvents.service', () => ({
 
 import prisma from '../lib/prisma';
 import { recordQueueEvent, afterEntryCalled } from './queueEvents.service';
+import { waitingLine } from './notifications.service';
 import { callEntry, holdEntry, resumeEntry, clearEntry } from './queueActions.service';
 
 const db = prisma as any;
@@ -61,16 +63,18 @@ describe('holdEntry', () => {
 });
 
 describe('callEntry', () => {
-  it('skips people on hold or awaiting payment when calling next', async () => {
-    db.queueEntry.findFirst.mockResolvedValue({ id: 'e2', joinedAt: new Date(), calledAt: null, heldAt: null });
+  const lineEntry = (id: string, extra: Record<string, unknown> = {}) => ({ id, joinedAt: new Date(), calledAt: null, heldAt: null, deskInstanceId: null, ...extra });
+
+  it('calls the first in the shared line order (which leaves out people on hold or awaiting payment)', async () => {
+    (waitingLine as any).mockResolvedValue([lineEntry('e2'), lineEntry('e3')]);
     await callEntry('q1', {});
-    const where = db.queueEntry.findFirst.mock.calls[0][0].where;
-    expect(where).toMatchObject({ queueId: 'q1', status: 'WAITING', heldAt: null, awaitingClearance: false });
+    expect(waitingLine).toHaveBeenCalledWith('q1');
+    expect(db.queueEntry.updateMany.mock.calls[0][0].where).toEqual({ id: 'e2', status: 'WAITING', awaitingClearance: false });
     expect((recordQueueEvent as any).mock.calls[0][0].action).toBe('entry.called');
   });
 
   it('calls someone returning to this desk first', async () => {
-    db.queueEntry.findFirst.mockResolvedValueOnce({ id: 'back', joinedAt: new Date(), calledAt: null, heldAt: null });
+    (waitingLine as any).mockResolvedValue([lineEntry('first'), lineEntry('back', { deskInstanceId: 'desk1' })]);
     db.queue.findUnique.mockResolvedValueOnce({ serviceId: 's1' });
     // A valid desk for the service.
     db.servicePointInstance.findUnique = vi.fn().mockResolvedValue({
@@ -78,7 +82,15 @@ describe('callEntry', () => {
       servicePointService: { serviceId: 's1', isActive: true, servicePoint: { isActive: true } },
     });
     await callEntry('q1', { servicePointInstanceId: 'desk1' });
-    expect(db.queueEntry.findFirst.mock.calls[0][0].where).toMatchObject({ deskInstanceId: 'desk1' });
+    expect(db.queueEntry.updateMany.mock.calls[0][0].where.id).toBe('back');
+  });
+
+  it('skips someone who belongs with another occupied desk', async () => {
+    (waitingLine as any).mockResolvedValue([lineEntry('theirs', { deskInstanceId: 'desk2' }), lineEntry('next')]);
+    db.queueEntry.findMany.mockResolvedValue([{ id: 'theirs', deskInstanceId: 'desk2' }]);
+    db.servicePointInstance.findMany.mockResolvedValue([{ id: 'desk2' }]);
+    await callEntry('q1', {});
+    expect(db.queueEntry.updateMany.mock.calls[0][0].where.id).toBe('next');
   });
 
   it('refuses to call a chosen patient who hasn’t paid', async () => {

@@ -11,6 +11,7 @@ export interface SubscriptionFeatures {
   maxServices: number;
   maxUsers: number;
   smsNotifications: boolean;
+  whatsappNotifications: boolean;
   analytics: boolean;
   apiAccess: boolean;
   emrIntegration: boolean;
@@ -61,6 +62,7 @@ const DEFAULT_FEATURES: SubscriptionFeatures = {
   maxServices: 3,
   maxUsers: 5,
   smsNotifications: false,
+  whatsappNotifications: false,
   analytics: false,
   apiAccess: false,
   emrIntegration: false,
@@ -207,6 +209,7 @@ const FEATURE_NAMES: Record<keyof SubscriptionFeatures, string> = {
   maxServices: 'More services',
   maxUsers: 'More staff',
   smsNotifications: 'Text message alerts',
+  whatsappNotifications: 'WhatsApp messages',
   analytics: 'Analytics',
   apiAccess: 'API access',
   emrIntegration: 'An EMR connection',

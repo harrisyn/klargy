@@ -92,6 +92,7 @@ await klargy.transferEntry('visit', 'VIS-456', { to: 'LOC-1:lab', reason: 'Lab o
 | `getEntryByRef(type, id, { service? })` | `GET /entries/by-ref/{type}/{id}` | yes |
 | `listEntries({ updatedSince, visit? })`, `iterateEntries(…)` | `GET /entries` | yes |
 | `launchDesk(input)` | `POST /desk/launch` | no |
+| `getStaffDesk(staffRef)` | `GET /staff/{staffRef}/desk` | yes |
 | `putAppointment(appointmentRef, input)` | `PUT /appointments/{appointmentRef}` | yes |
 | `getAnalytics({ from?, to?, location?, service? })` | `GET /analytics` | yes |
 | `setServiceStatus(service, { status, reason?, message? })` | `POST /services/{service}/status` | yes |

@@ -13,7 +13,7 @@ Express app in `frontend/src/server`, served from a single route,
 | Real-time | Pusher Channels (or Ably's Pusher adapter) | Serverless can't hold WebSockets; these do it for us |
 | Email | Any SMTP relay (Resend, Postmark, SES) | Uses the existing SMTP settings |
 | SMS (optional) | Twilio | `TWILIO_*` env vars |
-| AI (optional) | Any of Anthropic, OpenAI, Gemini, or an OpenAI-compatible endpoint | AI-assisted analytics |
+| AI (optional) | Any of Anthropic, OpenAI, Azure OpenAI, Gemini, or an OpenAI-compatible endpoint | AI-assisted analytics |
 
 Nothing else is required: rate limits and one-time codes are stored in
 Postgres, and background jobs run on Vercel Cron.
@@ -61,9 +61,27 @@ The AI layer is provider-agnostic (`frontend/src/server/services/ai`):
    provider is active at a time. Anthropic defaults to `claude-opus-5`, with
    automatic server-side fallback if a request is declined. Alternatively set
    `AI_PROVIDER` + the matching key env var (see `.env.example`).
+   **Test connection** checks the key and model in the form with one tiny
+   request, so it works before saving.
 2. Turn on **AI-assisted Analytics** in the plans that should include it
    (Superadmin → Subscription Plans), and give those plans AI credits.
 3. Each tenant org admin switches AI on from the Analytics page.
+
+**OpenAI and Azure OpenAI.** The `openai` provider uses OpenAI's Responses
+API (recommended by OpenAI for tool-using agents): strict function schemas,
+parallel tool calls, and `store: false` with encrypted reasoning items replayed
+between steps, so reasoning models keep their context without OpenAI storing
+the conversation. Pick a model from the suggestions or type any model name
+(default `gpt-5-mini`). Set `OPENAI_API=chat` to use Chat Completions instead,
+for example behind a proxy that lacks `/responses`. `azure_openai` takes the
+resource endpoint as the base URL and the deployment name as the model, and
+calls Chat Completions on Azure's v1 API (add `?api-version=...` to the
+endpoint for the classic per-deployment route). `openai_compatible` stays on
+plain Chat Completions with only the widely supported parameters. All three
+use `max_completion_tokens`/`max_output_tokens` where OpenAI requires it, never
+send `temperature`, take an optional `AI_REASONING_EFFORT`, retry 429 and 5xx
+responses with backoff (honouring `Retry-After`, but not when the account is
+out of quota), and time out after `AI_REQUEST_TIMEOUT_MS` (default 120 s).
 
 Each question uses one AI credit; the daily digest uses one per org per day.
 The model only receives aggregated statistics (counts, wait and service

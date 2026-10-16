@@ -38,6 +38,10 @@ export interface DeskEntry {
   awaitingClearance?: boolean;
   /** The desk they belong with (held there, or returning to it). */
   deskInstanceId?: string | null;
+  /** A booked patient: their appointment time; bookedPlaceAt is set when
+   * they arrived on time and are placed in line by it. */
+  bookedFor?: string | null;
+  bookedPlaceAt?: string | null;
   user?: { id: string; firstName: string; lastName: string; phone?: string | null } | null;
 }
 
@@ -78,6 +82,14 @@ export const personName = (e?: DeskEntry | null) =>
   e?.user ? `${e.user.firstName} ${e.user.lastName}`.trim() : '';
 
 export const isCallable = (e: DeskEntry) => !e.heldAt && !e.awaitingClearance;
+
+/** "Booked 10:30" for a booked patient (in this device's time), else ''. */
+export const bookedLabel = (e?: DeskEntry | null) =>
+  e?.bookedFor ? `Booked ${new Date(e.bookedFor).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : '';
+
+/** Tooltip for the booked chip: placed by booked time, or arrived outside the window. */
+export const bookedTitle = (e?: DeskEntry | null) =>
+  !e?.bookedFor ? '' : e.bookedPlaceAt ? 'Arrived on time: placed in line by their booked time' : 'Arrived outside their appointment window: in line by arrival';
 
 export const minutesAgo = (iso?: string | null) =>
   iso ? Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)) : 0;

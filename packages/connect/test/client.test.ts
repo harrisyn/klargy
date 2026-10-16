@@ -225,6 +225,24 @@ describe('KlargyConnect', () => {
     expect(calls[0].url).toMatch(/\/desk\/launch$/);
   });
 
+  it('gets the room a staff member is signed in to, retrying a server error', async () => {
+    const desk = {
+      servicePoint: { id: 'sp1', ref: 'ROOM3', name: 'Consulting Room 3', serviceId: 's1', serviceRef: 'clinic-1' },
+      desk: { id: 'd1', name: 'Consulting Room 3' },
+      signedInAt: '2026-10-15T09:00:00.000Z',
+    };
+    const { fetch, calls } = mockFetch(json(503, { error: 'Down' }), json(200, desk));
+    expect(await client(fetch).getStaffDesk('DR 1')).toEqual(desk);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].url).toMatch(/\/staff\/DR%201\/desk$/);
+    expect(calls[1].init.method).toBe('GET');
+  });
+
+  it('reports a practitioner Klargy does not know as STAFF_NOT_MAPPED', async () => {
+    const { fetch } = mockFetch(json(404, { error: 'Unknown', code: 'STAFF_NOT_MAPPED' }));
+    await expect(client(fetch).getStaffDesk('DR9')).rejects.toMatchObject({ status: 404, code: 'STAFF_NOT_MAPPED' });
+  });
+
   it('puts appointments and reports created', async () => {
     const appointment = { id: 'a1', status: 'booked' };
     const { fetch, calls } = mockFetch(json(201, { appointment }), json(200, { appointment }));

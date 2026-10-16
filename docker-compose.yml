@@ -45,13 +45,16 @@ services:
       REALTIME_PUBLIC_PORT: "6001"
       REALTIME_PUBLIC_TLS: "false"
       # AI-assisted analytics fallback config (normally set by the superadmin
-      # under AI Providers). AI_PROVIDER: anthropic | openai | gemini | openai_compatible
+      # under AI Providers). AI_PROVIDER: anthropic | openai | azure_openai | gemini | openai_compatible
       AI_PROVIDER: ${AI_PROVIDER:-anthropic}
       AI_MODEL: ${AI_MODEL:-}
       AI_BASE_URL: ${AI_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AI_REASONING_EFFORT: ${AI_REASONING_EFFORT:-}
+      OPENAI_API: ${OPENAI_API:-}
       # Dev conveniences - never set these in production
       ALLOW_PRIVATE_OUTBOUND_URLS: "true"
       CRON_SECRET: ${CRON_SECRET:-dev-cron-secret}

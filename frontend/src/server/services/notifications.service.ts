@@ -2,8 +2,10 @@ import prisma from '../lib/prisma';
 import { emitToUser, emitToQueue, SOCKET_EVENTS } from '../lib/realtime';
 import { consumeCredits } from '../middleware/subscription.middleware';
 import { sendNotificationEmail } from '../utils/email';
-import { getSmsProvider } from './sms';
+import { deliverToPhone } from './phoneDelivery';
+import { templateKeyFor } from './whatsapp/util';
 import { statusUrlFor } from '../config/appConfig';
+import { orderWaiting, readBookedArrivalSettings, lineRanks } from './queueOrder';
 
 export type QueueNotificationType = 'QUEUE_JOINED' | 'TURN_APPROACHING' | 'NOW_SERVING' | 'QUEUE_DELAYED';
 
@@ -31,8 +33,10 @@ export function readNotificationSettings(raw: unknown): NotificationSettings {
   };
 }
 
-// Waiting-line order used everywhere a "position" is shown or the next
-// patient is called: priority first, then manual reorder, then arrival.
+// The database half of the waiting-line order: priority first, then manual
+// reorder, then arrival. Booked patients placed by their booked time are
+// fitted in afterwards (see waitingLine and queueOrder.ts), so use
+// waitingLine wherever a position is shown or the next patient is called.
 export const WAITING_ORDER = [
   { priority: 'desc' as const },
   { sortOrder: 'asc' as const },
@@ -107,13 +111,13 @@ export async function notifyEntry(
   const entry = await prisma.queueEntry.findUnique({
     where: { id: entryId },
     include: {
-      user: { select: { id: true, email: true, phone: true } },
+      user: { select: { id: true, email: true, phone: true, firstName: true } },
       queue: {
         include: {
           service: {
             select: {
               name: true,
-              location: { select: { organization: { select: { id: true, name: true, slug: true, notificationSettings: true } } } },
+              location: { select: { name: true, organization: { select: { id: true, name: true, slug: true, notificationSettings: true } } } },
             },
           },
         },
@@ -124,13 +128,14 @@ export async function notifyEntry(
 
   const org = entry.queue.service.location.organization;
   const settings = readNotificationSettings(org.notificationSettings);
+  const statusUrl = statusUrlFor(entry.queueId, entry.id, org.slug);
   const { heading, message } = buildMessage(type, {
     ticket: entry.ticketNumber,
     service: entry.queue.service.name,
     position: extra.position,
     servicePoint: extra.servicePointName,
     text: extra.text,
-    statusUrl: statusUrlFor(entry.queueId, entry.id, org.slug),
+    statusUrl,
   });
 
   const inApp = await prisma.notification.create({
@@ -152,21 +157,30 @@ export async function notifyEntry(
     }
   }
 
-  if (settings.sms && entry.user.phone) {
-    const provider = await getSmsProvider();
-    if (provider) {
-      const credit = await consumeCredits(org.id, 'SMS', 1, `queue notification ${type}`);
-      if (credit.allowed) {
-        const sent = await provider.send(entry.user.phone, `${org.name}: ${message}`);
-        if (sent.success) {
-          await prisma.notification.create({
-            data: { userId: entry.user.id, type, channel: 'SMS', message, queueEntryId: entry.id, readAt: new Date() },
-          });
-        } else {
-          console.error('SMS send failed:', sent.error);
-        }
-      }
-    }
+  // WhatsApp when the org has it on, then SMS (its own setting, or as the
+  // WhatsApp fallback).
+  if (entry.user.phone) {
+    await deliverToPhone({
+      organizationId: org.id,
+      orgName: org.name,
+      userId: entry.user.id,
+      phone: entry.user.phone,
+      type,
+      templateKey: templateKeyFor(type, { transferred: !!entry.previousEntryId }),
+      message,
+      vars: {
+        name: entry.user.firstName,
+        ticket: entry.ticketNumber,
+        service: entry.queue.service.name,
+        location: entry.queue.service.location.name,
+        position: extra.position,
+        servicePoint: extra.servicePointName,
+        statusUrl,
+      },
+      dedupeKey: entry.id,
+      smsEnabled: settings.sms,
+      creditReason: `queue notification ${type}`,
+    });
   }
 }
 
@@ -180,12 +194,7 @@ export async function notifyPositions(queueId: string): Promise<void> {
   if (!queue) return;
   const { turnApproachingAt } = readNotificationSettings(queue.service.location.organization.notificationSettings);
 
-  const waiting = await prisma.queueEntry.findMany({
-    where: { queueId, ...CALLABLE_WHERE },
-    orderBy: WAITING_ORDER,
-    take: turnApproachingAt,
-    select: { id: true },
-  });
+  const waiting = (await waitingLine(queueId)).slice(0, turnApproachingAt);
   for (const [index, entry] of waiting.entries()) {
     await notifyEntry(entry.id, 'TURN_APPROACHING', { position: index + 1 });
   }
@@ -194,11 +203,47 @@ export async function notifyPositions(queueId: string): Promise<void> {
 /** 1-based position of a waiting entry in the same order staff call people
  * (0 when it has no place: on hold, waiting for payment, or not waiting). */
 export async function computePosition(queueId: string, entryId: string): Promise<number> {
-  const waiting = await prisma.queueEntry.findMany({
-    where: { queueId, ...CALLABLE_WHERE },
-    orderBy: WAITING_ORDER,
-    select: { id: true },
+  return (await queueLineRanks(queueId)).get(entryId) ?? 0;
+}
+
+const LINE_SELECT = {
+  id: true,
+  priority: true,
+  sortOrder: true,
+  joinedAt: true,
+  calledAt: true,
+  heldAt: true,
+  deskInstanceId: true,
+  bookedPlaceAt: true,
+} as const;
+
+/** The organisation's booked-arrival settings for a queue. */
+export async function bookedArrivalForQueue(queueId: string) {
+  const queue = await prisma.queue.findUnique({
+    where: { id: queueId },
+    select: { service: { select: { location: { select: { organization: { select: { bookedArrivalSettings: true } } } } } } },
   });
-  const index = waiting.findIndex((e) => e.id === entryId);
-  return index === -1 ? 0 : index + 1;
+  return readBookedArrivalSettings(queue?.service?.location?.organization?.bookedArrivalSettings);
+}
+
+/**
+ * Who can be called in a queue, in the order they are called: priority,
+ * then booked patients fitted in by their booked time among walk-ins
+ * (queueOrder.ts). The one order behind call next, positions, the desk,
+ * the lobby screen and the status page.
+ */
+export async function waitingLine(queueId: string) {
+  const [entries, settings] = await Promise.all([
+    prisma.queueEntry.findMany({ where: { queueId, ...CALLABLE_WHERE }, orderBy: WAITING_ORDER, select: LINE_SELECT }),
+    bookedArrivalForQueue(queueId),
+  ]);
+  // Switched off: everyone is in line by arrival, including booked patients
+  // placed while it was on.
+  const line = settings.enabled ? entries ?? [] : (entries ?? []).map((e) => ({ ...e, bookedPlaceAt: null }));
+  return orderWaiting(line, settings.maxBookedShare);
+}
+
+/** 1-based place in line of each callable entry of a queue. */
+export async function queueLineRanks(queueId: string): Promise<Map<string, number>> {
+  return lineRanks(await waitingLine(queueId));
 }

@@ -12,6 +12,7 @@ import {
   transferEntryToService,
   entryRefSubject,
   getOrCreateQueueForDate,
+  afterQueueChange,
   toEntrySnapshot,
   withPositions,
   withJourneys,
@@ -19,6 +20,8 @@ import {
   startJourney,
 } from '../services/queueEvents.service';
 import { notifyEntry } from '../services/notifications.service';
+import { recordWhatsAppOptIn } from '../services/whatsapp/webhook';
+import { bookedArrivalSettings, bookedFields } from '../services/bookedArrival.service';
 import {
   QueueActionError,
   callEntry,
@@ -137,6 +140,8 @@ interface PatientInput {
   phone?: string | null;
   email?: string | null;
   identifiers?: Record<string, string>;
+  /** The patient agreed to WhatsApp messages from this organisation. */
+  whatsappOptIn?: boolean;
 }
 
 export function parsePatient(value: unknown, field = 'patient'): PatientInput {
@@ -147,6 +152,10 @@ export function parsePatient(value: unknown, field = 'patient'): PatientInput {
     lastName: text(p.lastName, `${field}.lastName`)!,
   };
   if ('phone' in p) out.phone = text(p.phone, `${field}.phone`, false) ?? null;
+  if (p.whatsappOptIn !== undefined && p.whatsappOptIn !== null) {
+    if (typeof p.whatsappOptIn !== 'boolean') throw badRequest(`${field}.whatsappOptIn must be true or false`);
+    out.whatsappOptIn = p.whatsappOptIn;
+  }
   if ('email' in p) {
     const email = text(p.email, `${field}.email`, false)?.toLowerCase() ?? null;
     if (email && !/^[^\s@]+@[^\s@]+$/.test(email)) throw badRequest(`${field}.email is not an email address`);
@@ -184,6 +193,18 @@ function identityData(existing: unknown, input: PatientInput) {
  * `input` updates the details when given.
  */
 export async function upsertPatient(
+  integration: Caller,
+  externalId: string,
+  input: PatientInput | undefined
+): Promise<{ userId: string; created: boolean }> {
+  const result = await upsertPatientRecord(integration, externalId, input);
+  if (input?.whatsappOptIn === true && input.phone) {
+    await recordWhatsAppOptIn(integration.organizationId, input.phone, 'connect').catch((e) => console.error('WhatsApp opt-in not saved:', e));
+  }
+  return result;
+}
+
+async function upsertPatientRecord(
   integration: Caller,
   externalId: string,
   input: PatientInput | undefined
@@ -334,6 +355,33 @@ async function linkVisit(integration: Caller, visitId: string, entryId: string) 
 
 /** A ticket issued for a known appointment checks the appointment in
  * (phase 5). An unknown or already closed appointment is ignored. */
+/** The appointment `refs.appointment` names, while it can still be checked
+ * in (scheduled or confirmed), for placing the patient by booked time. */
+async function bookableAppointment(integration: Caller, appointmentRef: string | undefined) {
+  if (!appointmentRef) return null;
+  const appointmentId = await klargyIdFor(integration.id, 'appointment', appointmentRef);
+  if (!appointmentId) return null;
+  return prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      status: { in: ['SCHEDULED', 'CONFIRMED'] },
+      service: { location: { organizationId: integration.organizationId } },
+    },
+    select: { id: true, startTime: true },
+  });
+}
+
+/** A booked patient's entry that was already open when the appointment
+ * arrived: placed by booked time as of when it joined, if it has no
+ * appointment yet and is still waiting. */
+async function placeOpenEntry(entryId: string, appointment: { id: string; startTime: Date }, organizationId: string) {
+  const entry = await prisma.queueEntry.findUnique({ where: { id: entryId }, select: { joinedAt: true, bookedFor: true, queueId: true } });
+  if (!entry || entry.bookedFor) return;
+  const fields = bookedFields(appointment, await bookedArrivalSettings(organizationId), entry.joinedAt);
+  const { count } = await prisma.queueEntry.updateMany({ where: { id: entryId, status: 'WAITING', bookedFor: null }, data: fields });
+  if (count === 1 && fields.bookedPlaceAt) await afterQueueChange(entry.queueId);
+}
+
 async function checkInAppointment(integration: Caller, appointmentRef: string, entryId: string) {
   const appointmentId = await klargyIdFor(integration.id, 'appointment', appointmentRef);
   if (!appointmentId) return;
@@ -385,6 +433,8 @@ async function createEntry(req: Request): Promise<Result> {
     });
     if (open) {
       if (encounterRef) await linkRef(integration, 'encounter', open.id, encounterRef);
+      const appointment = await bookableAppointment(integration, appointmentRef);
+      if (appointment) await placeOpenEntry(open.id, appointment, integration.organizationId);
       if (appointmentRef) await checkInAppointment(integration, appointmentRef, open.id);
       // Paid since the ticket was issued: the gate opens.
       if (cleared) await clearEntry(open.id, { origin: originOf(integration) });
@@ -401,10 +451,14 @@ async function createEntry(req: Request): Promise<Result> {
     throw new ConnectError('That visit belongs to a different patient', 409, 'VISIT_PATIENT_MISMATCH');
   }
 
+  // A booked patient arriving on time is placed by their booked time.
+  const appointment = await bookableAppointment(integration, appointmentRef);
+  const booked = appointment ? bookedFields(appointment, await bookedArrivalSettings(integration.organizationId)) : null;
+
   try {
     const { entry } = await joinQueueEntry(
       today.queue.id,
-      { userId, priority: priority as number, notes, journeyId: journey?.id ?? null, cleared },
+      { userId, priority: priority as number, notes, journeyId: journey?.id ?? null, cleared, booked },
       { origin: originOf(integration) },
       {
         // References first, so entry.joined already carries them.

@@ -35,6 +35,8 @@ interface LocationInfo {
   };
   /** Set when the organisation checks an MR or member number with its EMR before issuing a ticket. */
   joinIdentifier?: { type: 'mrNumber' | 'memberNumber'; label: string } | null;
+  /** ASK: offer "send me updates on WhatsApp"; NOTICE: say updates come on WhatsApp. */
+  whatsapp?: 'ASK' | 'NOTICE' | null;
   services: {
     id: string;
     name: string;
@@ -103,6 +105,7 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
     notes: '',
   });
   const [joining, setJoining] = useState(false);
+  const [whatsappOptIn, setWhatsappOptIn] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [kioskCountdown, setKioskCountdown] = useState<number | null>(null);
   
@@ -313,6 +316,10 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
       
       if (mode === 'session') {
         bodyData.sessionId = sessionId;
+      }
+      // Consent to WhatsApp messages, only with a number to send them to.
+      if (location?.whatsapp === 'ASK' && whatsappOptIn && bodyData.phone) {
+        bodyData.whatsappOptIn = true;
       }
 
       const res = await fetch(endpoint, {
@@ -634,10 +641,19 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
                     required={fieldConfig.required}
                   />
                 )}
-                {fieldKey === 'phone' && !kiosk && <small className={styles.hint}>We’ll text you when you’re nearly up.</small>}
+                {fieldKey === 'phone' && !kiosk && !location?.whatsapp && <small className={styles.hint}>We’ll text you when you’re nearly up.</small>}
+                {fieldKey === 'phone' && location?.whatsapp === 'NOTICE' && (
+                  <small className={styles.hint}>We’ll message you on WhatsApp when you’re nearly up. Reply STOP to stop.</small>
+                )}
               </label>
             );
           })}
+          {location?.whatsapp === 'ASK' && 'phone' in identityFields && !(kiosk && !identityFields.phone?.required) && (
+            <label className={styles.consent} htmlFor="field-whatsapp">
+              <input id="field-whatsapp" type="checkbox" checked={whatsappOptIn} onChange={(e) => setWhatsappOptIn(e.target.checked)} />
+              <span>Send me updates on WhatsApp. Reply STOP at any time to stop.</span>
+            </label>
+          )}
         </div>
         {error && <p className={styles.error} role="alert">{error}</p>}
         <button type="submit" className={styles.primary} disabled={joining}>

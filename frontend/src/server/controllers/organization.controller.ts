@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
+import { readBookedArrivalSettings } from '../services/queueOrder';
 import { isJoinIdentifierType } from '../services/connectLookup.service';
 import bcrypt from 'bcryptjs';
 import { signToken } from '../lib/jwt';
@@ -316,7 +317,7 @@ export const getOrganization = async (req: Request, res: Response, next: NextFun
 export const updateOrganization = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { name, email, phone, slug, identityFieldsConfig, defaultDisplayMode, primaryColor, hidePoweredBy, notificationSettings, industry, customerLabel, customerLabelPlural, joinIdentifierType } = req.body;
+    const { name, email, phone, slug, identityFieldsConfig, defaultDisplayMode, primaryColor, hidePoweredBy, notificationSettings, industry, customerLabel, customerLabelPlural, joinIdentifierType, bookedArrivalSettings } = req.body;
 
     if (primaryColor !== undefined || hidePoweredBy !== undefined) {
       const features = await getOrganizationFeatures(id);
@@ -359,6 +360,12 @@ export const updateOrganization = async (req: Request, res: Response, next: Next
     if (primaryColor !== undefined) updateData.primaryColor = primaryColor || null;
     if (hidePoweredBy !== undefined) updateData.hidePoweredBy = Boolean(hidePoweredBy);
     if (notificationSettings !== undefined) updateData.notificationSettings = readNotificationSettings(notificationSettings);
+    if (bookedArrivalSettings !== undefined) {
+      if (bookedArrivalSettings !== null && (typeof bookedArrivalSettings !== 'object' || Array.isArray(bookedArrivalSettings))) {
+        return res.status(400).json({ error: 'bookedArrivalSettings must be an object' });
+      }
+      updateData.bookedArrivalSettings = readBookedArrivalSettings(bookedArrivalSettings);
+    }
     if (industry !== undefined) {
       if (industry !== null && !INDUSTRIES.some((i) => i.id === industry)) return res.status(400).json({ error: 'Unknown industry' });
       updateData.industry = industry;

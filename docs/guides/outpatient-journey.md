@@ -63,7 +63,7 @@ Give each person a Klargy login with the role that fits:
 Each person picks their desk when they open the desk (or the EMR does it for
 them when the desk is embedded). Calls go to the desk they are signed in to.
 When the EMR is connected, map each staff member to their EMR user so the
-EMR can call patients into their room (section 6).
+EMR can call patients into their room (section 7).
 
 ## 3. The payment gate
 
@@ -80,7 +80,39 @@ consultation being paid is **awaiting payment**:
 
 Turn the setting on for any other service that should wait for payment.
 
-## 4. At the desk
+## 4. Booked patients on arrival
+
+A patient with an appointment who checks in on time takes their place in
+line by their booked time, not at the back behind everyone who walked in
+while they were on their way. It applies however they check in: from the
+EMR (a ticket issued with the appointment, `refs.appointment`) or by staff
+pressing **Check in** on the appointment in Klargy.
+
+With the default settings (**Admin → Settings → Booked arrivals**):
+
+- **On time** is from 10 minutes before to 15 minutes after the booked time.
+  A patient booked for 10:30 who arrives at 10:20 waits behind everyone who
+  arrived before 10:30 and ahead of anyone arriving after; arriving at 10:40
+  they go ahead of the walk-ins who arrived between 10:30 and 10:40.
+- **Late** (after 10:45 for a 10:30 booking) or very early (before 10:20):
+  they join by arrival, like a walk-in.
+- **Nobody already called is passed**, priority still comes first, and
+  dragging the line into a different order at the desk wins over booked
+  time.
+- **Walk-ins keep moving**: at most one booked patient who arrived after a
+  waiting walk-in goes ahead of them before that walk-in is next ("Half").
+  Choose two or three per walk-in, no limit, or none.
+
+You can switch it off, or change the window and the share. Switched off,
+booked patients checked in by staff go ahead of walk-ins (as before), and
+those checked in from the EMR join by arrival.
+
+The desk list and **Call a specific patient** show a **Booked 10:30** chip
+(hover for whether they were placed by it), and so does the patient's status
+page. Call next, positions, "your turn is close" messages and the lobby
+screen all follow the same order.
+
+## 5. At the desk
 
 The desk bar has, besides Call next, Complete, Send on and No show:
 
@@ -99,7 +131,7 @@ Consultation after the laboratory) returns to the room that saw them: Call
 next in that room picks them first, and the other rooms skip them while that
 room is staffed.
 
-## 5. What patients see
+## 6. What patients see
 
 Patients join at the kiosk or by scanning the location's QR code. With no
 service chosen, they join the first point of contact (Reception). Their
@@ -117,19 +149,23 @@ status page shows their ticket, their place and when it's their turn, and:
 Only the ticket's own status link can do this, and only a few times per
 ticket.
 
-## 6. The EMR side
+## 7. The EMR side
 
 An EMR connected through [Klargy Connect](../connect/guide.md) follows and
 drives the same journey:
 
 - **Check-in**: the EMR issues the Consultation ticket with `"cleared": true`
   when the consultation is paid, without it otherwise. When the bill is paid
-  later it calls `clear` on the visit's ticket.
+  later it calls `clear` on the visit's ticket. For a booked patient it sends
+  `refs.appointment` (after sending the appointment with `PUT
+  /appointments`), so an on-time patient is placed by booked time (section 4).
 - **Reception**: when a receptionist starts the visit in the EMR for the
   walk-in they are serving, the EMR calls `POST /entries/serving/link` to
   link that ticket to the EMR's patient and visit.
 - **Consulting room**: the doctor calls the patient from the encounter with
-  `call` and `staff`, which calls into the room they are signed in to.
+  `call` and `staff`, which calls into the room they are signed in to. To
+  check which room that is (say, when the EMR missed a `servicepoint.opened`
+  webhook), it asks `GET /staff/{staffRef}/desk`.
   `hold` and `resume` do the same as the desk buttons.
 - **Ending a step**: `transfer` sends the patient on (orders to the lab,
   prescriptions to the pharmacy); `complete` ends the visit.
