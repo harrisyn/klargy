@@ -43,6 +43,10 @@ model Organization {
   // Kiosk and public join ask for this identifier ("mrNumber" or
   // "memberNumber") and check it with the connected system. Null = off.
   joinIdentifierType    String?
+  // Booked patients arriving on time are placed by their booked time:
+  // {"enabled": true, "earlyMinutes": 10, "lateMinutes": 15, "maxBookedShare": 50}
+  // (src/server/services/queueOrder.ts). Null = those defaults.
+  bookedArrivalSettings Json?
   // Tenant opt-in for AI-assisted analytics (also needs the plan's "ai" feature)
   aiEnabled             Boolean                  @default(false)
   createdAt             DateTime                 @default(now())
@@ -328,6 +332,12 @@ model QueueEntry {
   // Who sent this entry here when it came from a transfer: staff, patient,
   // integration; null for a first ticket or an automatic flow.
   sentBy                 String?
+  // A booked patient's appointment (Klargy's id) and its booked time, shown
+  // as "Booked 10:30"; bookedPlaceAt is the time they are placed in line by
+  // when they arrived on time (else null: placed by arrival, as a walk-in).
+  appointmentId          String?
+  bookedFor              DateTime?
+  bookedPlaceAt          DateTime?
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
   queue                  Queue                 @relation(fields: [queueId], references: [id], onDelete: Cascade)

@@ -78,6 +78,15 @@ export interface Appointment {
   slot: { id: string; startTime: string; endTime: string } | null;
 }
 
+/** Booked patients arriving on time are placed by their booked time. */
+export interface BookedArrivalSettings {
+  enabled: boolean;
+  earlyMinutes: number;
+  lateMinutes: number;
+  /** Percent: at most this share of those placed ahead of a walk-in are booked patients who arrived after them. */
+  maxBookedShare: number;
+}
+
 export interface NotificationSettings {
   turnApproachingAt: number;
   email: boolean;
@@ -1313,6 +1322,7 @@ class ApiClient {
     primaryColor?: string | null;
     hidePoweredBy?: boolean;
     notificationSettings?: NotificationSettings;
+    bookedArrivalSettings?: BookedArrivalSettings;
   }) {
     const { data } = await this.client.put(`/orgs/${id}`, payload);
     return data;

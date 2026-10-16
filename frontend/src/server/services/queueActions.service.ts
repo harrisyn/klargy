@@ -2,7 +2,8 @@ import prisma from '../lib/prisma';
 import { emitToQueue, emitToLocation, emitToQueueAndLocation, SOCKET_EVENTS } from '../lib/realtime';
 import { generateTicketNumber, getNextSequence } from '../utils/ticket';
 import { checkLimit } from '../middleware/subscription.middleware';
-import { CALLABLE_WHERE, WAITING_ORDER, computePosition } from './notifications.service';
+import { CALLABLE_WHERE, computePosition, waitingLine } from './notifications.service';
+import type { BookedFields } from './bookedArrival.service';
 import {
   recordQueueEvent,
   startJourney,
@@ -98,6 +99,8 @@ export async function joinQueueEntry(
     journeyId?: string | null;
     /** Payment already settled: skip the service's clearance gate. */
     cleared?: boolean;
+    /** A booked patient checking in: their appointment and place in line. */
+    booked?: BookedFields | null;
   },
   ctx: ActionContext = {},
   hooks: { beforeEvent?: (entryId: string) => Promise<void> } = {}
@@ -131,6 +134,7 @@ export async function joinQueueEntry(
       notes,
       awaitingClearance: !!queue.service.requiresClearance && !input.cleared,
       ...(input.journeyId ? { journeyId: input.journeyId } : {}),
+      ...(input.booked ?? {}),
     },
     include: {
       user: { select: { id: true, firstName: true, lastName: true, phone: true } },
@@ -212,21 +216,18 @@ export async function callEntry(
   let wasHeld = false;
   for (let attempt = 0; attempt < 5 && !claimedId; attempt++) {
     const select = { id: true, joinedAt: true, calledAt: true, heldAt: true };
-    const candidate = requestedEntryId
-      ? await prisma.queueEntry.findFirst({ where: { id: requestedEntryId, queueId, status: 'WAITING', awaitingClearance: false }, select })
-      : // Someone returning to this desk goes first, then the line.
-        ((servicePointInstanceId
-          ? await prisma.queueEntry.findFirst({
-              where: { queueId, ...CALLABLE_WHERE, deskInstanceId: servicePointInstanceId },
-              orderBy: WAITING_ORDER,
-              select,
-            })
-          : null) ??
-        (await prisma.queueEntry.findFirst({
-          where: { queueId, ...CALLABLE_WHERE, ...(reservedElsewhere.length ? { id: { notIn: reservedElsewhere } } : {}) },
-          orderBy: WAITING_ORDER,
-          select,
-        })));
+    let candidate: { id: string; joinedAt: Date; calledAt: Date | null; heldAt: Date | null } | null;
+    if (requestedEntryId) {
+      candidate = await prisma.queueEntry.findFirst({ where: { id: requestedEntryId, queueId, status: 'WAITING', awaitingClearance: false }, select });
+    } else {
+      // Someone returning to this desk goes first, then the line (in the
+      // shared line order, with booked patients placed by booked time).
+      const line = await waitingLine(queueId);
+      candidate =
+        (servicePointInstanceId ? line.find((e) => e.deskInstanceId === servicePointInstanceId) : undefined) ??
+        line.find((e) => !reservedElsewhere.includes(e.id)) ??
+        null;
+    }
     if (!candidate) break;
     const claimed = await prisma.queueEntry.updateMany({
       where: { id: candidate.id, status: 'WAITING', awaitingClearance: false },

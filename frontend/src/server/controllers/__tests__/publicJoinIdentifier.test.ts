@@ -28,6 +28,7 @@ vi.mock('../../services/queueEvents.service', () => ({
 }));
 vi.mock('../../services/notifications.service', () => ({
   WAITING_ORDER: [], CALLABLE_WHERE: { status: 'WAITING', heldAt: null, awaitingClearance: false }, computePosition: vi.fn(async () => 1), notifyEntry: vi.fn(async () => {}),
+  queueLineRanks: vi.fn(async () => new Map([['e1', 1]])),
 }));
 vi.mock('../../services/connectLookup.service', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../services/connectLookup.service')>()),

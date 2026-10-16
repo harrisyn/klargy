@@ -11,7 +11,7 @@ import { Badge, Button, Modal, PageHeader } from '@/components/ui';
 import WaitAlerts from '@/components/ai/WaitAlerts';
 import DeskPanel, { useDeskShortcuts } from '@/components/desk/DeskPanel';
 import DeskPicker from '@/components/desk/DeskPicker';
-import { useDesk, minutesAgo, personName, type DeskEntry } from '@/components/desk/useDesk';
+import { useDesk, bookedLabel, bookedTitle, minutesAgo, personName, type DeskEntry } from '@/components/desk/useDesk';
 import { usePopOut } from '@/components/desk/usePopOut';
 
 /**
@@ -256,6 +256,7 @@ export default function QueueManagementPage() {
                     <span className="desk-pos">{i + 1}</span>
                     <b>{e.ticketNumber}</b>
                     <span className="desk-queue-name">{personName(e)}</span>
+                    {e.bookedFor && <Badge tone="neutral" title={bookedTitle(e)}>{bookedLabel(e)}</Badge>}
                     {e.heldAt ? (
                       <Badge tone="primary">On hold</Badge>
                     ) : e.awaitingClearance ? (

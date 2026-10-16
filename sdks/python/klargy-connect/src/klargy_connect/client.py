@@ -255,6 +255,13 @@ class _Endpoints:
         `{url, expiresAt, staff: {klargyId, created}}`. The url works once within 60 seconds."""
         return self._send(_Call("POST", "/desk/launch", body, timeout=timeout))
 
+    def get_staff_desk(self, staff_ref: str, *, timeout: Optional[float] = None):
+        """GET /staff/{staffRef}/desk: the room the staff member (the EMR's practitioner id) is signed in
+        to now: `{servicePoint: {id, ref, name, serviceId, serviceRef} | None, desk: {id, name} | None,
+        signedInAt}`. For checking a room without relying on `servicepoint.opened` webhooks. 404
+        `STAFF_NOT_MAPPED` for a practitioner Klargy doesn't know."""
+        return self._send(_Call("GET", f"/staff/{_seg(staff_ref)}/desk", timeout=timeout))
+
     # --- phase 5: journey automation --------------------------------------------------------------
 
     def upsert_appointment(self, appointment_ref: str, body: Body, *, timeout: Optional[float] = None):

@@ -3,7 +3,7 @@ import { emitToQueue, emitToLocation, SOCKET_EVENTS } from '../lib/realtime';
 import { generateTicketNumber, getNextSequence } from '../utils/ticket';
 import { getStartOfDay, generateTimeSlots, validTimeZone } from '../utils/date';
 import { dispatchWebhook, WebhookEvent } from './webhooks.service';
-import { CALLABLE_WHERE, WAITING_ORDER, notifyEntry, notifyPositions } from './notifications.service';
+import { notifyEntry, notifyPositions, queueLineRanks } from './notifications.service';
 import { statusUrlFor } from '../config/appConfig';
 import { buildRefs, RefSubject } from './externalRefs.service';
 
@@ -218,8 +218,7 @@ export async function withPositions<T extends { entryId: string; queueId: string
   if (queueIds.length === 0) return snapshots;
   const places = new Map<string, number>();
   for (const queueId of queueIds) {
-    const waiting = await prisma.queueEntry.findMany({ where: { queueId, ...CALLABLE_WHERE }, orderBy: WAITING_ORDER, select: { id: true } });
-    waiting.forEach((e, i) => places.set(e.id, i + 1));
+    for (const [id, place] of await queueLineRanks(queueId)) places.set(id, place);
   }
   return snapshots.map((s) => (s.status === 'WAITING' ? { ...s, position: places.get(s.entryId) ?? null } : s));
 }

@@ -135,6 +135,7 @@ def test_user_agent_can_be_left_to_httpx():
          "/entries?updatedSince=2026-10-14T00%3A00%3A00.000Z&visit=v1", None),
         (lambda c: c.launch_desk({"staff": {"id": "d1", "name": "Ama"}, "returnOrigin": "https://emr"}), "POST",
          "/desk/launch", {"staff": {"id": "d1", "name": "Ama"}, "returnOrigin": "https://emr"}),
+        (lambda c: c.get_staff_desk("DR 1"), "GET", "/staff/DR%201/desk", None),
         (lambda c: c.upsert_appointment("a1", {"service": "s1"}), "PUT", "/appointments/a1", {"service": "s1"}),
         (lambda c: c.get_analytics(), "GET", "/analytics", None),
         (lambda c: c.get_analytics(from_="2026-10-01T00:00:00Z", to="2026-10-02T00:00:00Z", location="l1",

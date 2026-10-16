@@ -214,7 +214,11 @@ paths:
         A new ticket (201) sends the patient Klargy's "you've joined" message
         with their `statusUrl`; a 200 or a replayed request does not. With
         `refs.appointment` naming a booked appointment Klargy knows, the
-        appointment is checked in (`appointment.checked_in`).
+        appointment is checked in (`appointment.checked_in`), and a patient
+        arriving on time (within the organisation's window around the booked
+        time, default 10 minutes before to 15 after) is placed in line by
+        their booked time instead of at the back (v1.md section 5, "Booked
+        patients on arrival").
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -743,6 +747,43 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '404':
           description: '`SERVICE_POINT_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /staff/{staffRef}/desk:
+    get:
+      tags: [Desk]
+      operationId: getStaffDesk
+      summary: The room a staff member is signed in to now
+      description: |
+        Scope `desk:launch`. The room (service point) and desk the staff
+        member is signed in to right now, anywhere in Klargy, or
+        `servicePoint: null` when they are in none. The same fact the
+        `servicepoint.opened` / `servicepoint.closed` webhooks report, for
+        checking it when a webhook may have been missed. When they are signed
+        in to several desks, the one they signed in to last.
+      parameters:
+        - name: staffRef
+          in: path
+          required: true
+          description: The EMR's practitioner id (its `staff` mapping); Klargy's own user id is also accepted.
+          schema: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: The room, or `servicePoint: null`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffDeskResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Missing scope or plan feature.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`STAFF_NOT_MAPPED`: no staff member in the organisation has that mapping or id.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1286,6 +1327,7 @@ components:
             - NOT_FOUND
             - ORIGIN_NOT_ALLOWED
             - STAFF_INACTIVE
+            - STAFF_NOT_MAPPED
             - LOCATION_NOT_MAPPED
         limitType: { type: string, description: 'LIMIT_REACHED' }
         current: { type: integer, description: 'LIMIT_REACHED' }
@@ -1913,6 +1955,29 @@ components:
           properties:
             klargyId: { type: string }
             created: { type: boolean, description: 'This call registered the staff member.' }
+
+    StaffDeskResponse:
+      type: object
+      required: [servicePoint, desk, signedInAt]
+      properties:
+        servicePoint:
+          type: [object, 'null']
+          description: The room they are signed in to, or null.
+          required: [id, ref, name, serviceId, serviceRef]
+          properties:
+            id: { type: string, description: Klargy's service point id. }
+            ref: { type: [string, 'null'], description: The EMR's id for the room (its `service_point` mapping). }
+            name: { type: string }
+            serviceId: { type: string, description: The Klargy service the desk serves. }
+            serviceRef: { type: [string, 'null'], description: The EMR's id for that service (its `service` mapping). }
+        desk:
+          type: [object, 'null']
+          description: The desk (one of the room's desks) they sit at.
+          required: [id, name]
+          properties:
+            id: { type: string }
+            name: { type: string }
+        signedInAt: { type: [string, 'null'], format: date-time, description: When they signed in to it. }
 
     AppointmentRequest:
       type: object
