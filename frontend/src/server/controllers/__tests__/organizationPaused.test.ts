@@ -43,7 +43,8 @@ describe('getLocationByCode - paused organization', () => {
     const res = makeRes();
     await getLocationByCode(req, res, vi.fn());
     expect(res.status).not.toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith({ ...location, joinIdentifier: null });
+    // No WhatsApp set up (the mocked prisma has none): no WhatsApp prompt on the join form.
+    expect(res.json).toHaveBeenCalledWith({ ...location, joinIdentifier: null, whatsapp: null });
   });
 });
 

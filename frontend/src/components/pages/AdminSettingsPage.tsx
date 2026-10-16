@@ -4,13 +4,14 @@ import NoOrganization from '@/components/NoOrganization';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Building2, ContactRound, MonitorSmartphone, Bell, Palette, Globe, Lock, Upload, ArrowUp, ArrowDown, X, Plus,
-  CheckCircle2, RefreshCw, Copy, AlertTriangle,
+  CheckCircle2, RefreshCw, Copy, AlertTriangle, MessageCircle,
 } from 'lucide-react';
 import api from '@/api/client';
 import type { CustomDomainInfo } from '@/api/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import Layout from '@/components/Layout';
+import WhatsAppSettings from '@/components/pages/WhatsAppSettings';
 import { PageHeader, Button, Switch } from '@/components/ui';
 import { buildTenantUrl } from '@/lib/subdomain';
 import { isReservedSlug } from '@/lib/reservedSlugs';
@@ -44,13 +45,16 @@ interface Organization {
   joinIdentifierType?: string | null;
 }
 
-type Section = 'general' | 'patient' | 'screens' | 'notifications' | 'branding' | 'domain';
+type Section = 'general' | 'patient' | 'screens' | 'notifications' | 'whatsapp' | 'branding' | 'domain';
+// Sections with their own save button (the main save bar is hidden there).
+const OWN_SAVE: Section[] = ['whatsapp', 'domain'];
 
 const sectionsFor = (t: Terms): { id: Section; label: string; hint: string; icon: typeof Building2 }[] => [
   { id: 'general', label: 'Organization', hint: 'Name, type, contact and workspace address', icon: Building2 },
   { id: 'patient', label: `${t.Person} details`, hint: 'What people are asked when they join', icon: ContactRound },
   { id: 'screens', label: 'Screen privacy', hint: `How ${t.people} appear on lobby screens`, icon: MonitorSmartphone },
   { id: 'notifications', label: 'Notifications', hint: 'Turn-approaching alerts by email and SMS', icon: Bell },
+  { id: 'whatsapp', label: 'WhatsApp', hint: 'Updates from your own WhatsApp number', icon: MessageCircle },
   { id: 'branding', label: 'Branding', hint: 'Logo and colour on public pages', icon: Palette },
   { id: 'domain', label: 'Custom domain', hint: 'Use your own web address', icon: Globe },
 ];
@@ -495,7 +499,16 @@ export default function AdminSettingsPage() {
                 <Switch label={`Email ${terms.people} who give an email address`} checked={notify.email} onChange={(e) => setNotify({ ...notify, email: e.target.checked })} />
                 <Switch label={`Text ${terms.people} who give a phone number`} checked={notify.sms} onChange={(e) => setNotify({ ...notify, sms: e.target.checked })} />
               </div>
+              <p className="settings-note">
+                To send these on WhatsApp from your own number, set up{' '}
+                <button type="button" className="displays-link" onClick={() => { setSection('whatsapp'); setMessage(null); }}>WhatsApp</button>.
+                It’s tried first; a text goes when it can’t deliver, if you choose.
+              </p>
             </section>
+          )}
+
+          {section === 'whatsapp' && (
+            <WhatsAppSettings organizationId={organization.id} allowed={hasFeature('whatsappNotifications')} person={terms.People} />
           )}
 
           {section === 'branding' && (
@@ -622,7 +635,7 @@ export default function AdminSettingsPage() {
             </section>
           )}
 
-          {section !== 'domain' && (
+          {!OWN_SAVE.includes(section) && (
             <div className="settings-savebar" data-dirty={dirty}>
               <span role="status">
                 {message ? (

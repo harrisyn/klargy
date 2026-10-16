@@ -1498,6 +1498,9 @@ components:
         lastName: { type: string, maxLength: 200 }
         phone: { type: [string, 'null'], maxLength: 200 }
         email: { type: [string, 'null'], format: email }
+        whatsappOptIn:
+          type: boolean
+          description: The patient agreed to WhatsApp messages from this organisation. Recorded against their phone number when the organisation has WhatsApp set up (Settings → WhatsApp); false or absent changes nothing.
         identifiers:
           type: object
           maxProperties: 20

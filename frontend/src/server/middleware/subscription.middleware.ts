@@ -10,6 +10,7 @@ export type FeatureKey =
   | 'maxServices'
   | 'maxUsers'
   | 'smsNotifications'
+  | 'whatsappNotifications'
   | 'analytics'
   | 'apiAccess'
   | 'emrIntegration'
@@ -24,6 +25,7 @@ interface SubscriptionFeatures {
   maxServices?: number;
   maxUsers?: number;
   smsNotifications?: boolean;
+  whatsappNotifications?: boolean;
   analytics?: boolean;
   apiAccess?: boolean;
   emrIntegration?: boolean;
@@ -50,6 +52,7 @@ const DEFAULT_FEATURES: SubscriptionFeatures = {
   maxServices: 3,
   maxUsers: 5,
   smsNotifications: false,
+  whatsappNotifications: false,
   analytics: false,
   apiAccess: false,
   emrIntegration: false,
