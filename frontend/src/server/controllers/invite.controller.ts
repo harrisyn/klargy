@@ -50,7 +50,7 @@ export const createInvite = async (req: Request, res: Response, next: NextFuncti
     let emailed = false;
     if (email) {
       const [org, inviter] = await Promise.all([
-        prisma.organization.findUnique({ where: { id: targetOrgId }, select: { name: true, slug: true } }),
+        prisma.organization.findUnique({ where: { id: targetOrgId }, select: { name: true, slug: true, logoUrl: true, primaryColor: true, hidePoweredBy: true } }),
         prisma.user.findUnique({ where: { id: caller.id }, select: { firstName: true, lastName: true } }),
       ]);
       const base = await returnBaseUrl(req.headers.origin as string | undefined, org?.slug);
@@ -59,6 +59,7 @@ export const createInvite = async (req: Request, res: Response, next: NextFuncti
         orgName: org?.name || 'your team',
         inviterName: inviter ? `${inviter.firstName} ${inviter.lastName}`.trim() : 'Your admin',
         roleLabel: ROLE_LABELS[role] || 'staff',
+        brand: org ?? undefined,
       }).catch(() => ({ success: false }));
       emailed = !!result?.success;
     }

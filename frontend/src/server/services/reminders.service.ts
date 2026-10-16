@@ -29,7 +29,7 @@ export async function sendAppointmentReminders(): Promise<number> {
       service: {
         select: {
           name: true,
-          location: { select: { name: true, timezone: true, organization: { select: { id: true, name: true, notificationSettings: true, status: true } } } },
+          location: { select: { name: true, timezone: true, organization: { select: { id: true, name: true, logoUrl: true, primaryColor: true, hidePoweredBy: true, notificationSettings: true, status: true } } } },
         },
       },
     },
@@ -54,7 +54,18 @@ export async function sendAppointmentReminders(): Promise<number> {
     let emailed = false;
     if (settings.email && isRealEmail(appt.user.email)) {
       const credit = await consumeCredits(org.id, 'EMAIL', 1, 'appointment reminder');
-      if (credit.allowed && (await sendNotificationEmail(appt.user.email, 'Appointment reminder', message, org.name)).success) {
+      const sent = credit.allowed
+        ? await sendNotificationEmail(appt.user.email, 'Your appointment is coming up', `This is a friendly reminder of your upcoming appointment with ${org.name}. Please check in when you arrive.`, {
+            brand: org,
+            details: [
+              ['Service', appt.service.name],
+              ['Where', appt.service.location.name],
+              ['When', `${day} at ${time}`],
+            ],
+            reason: `You're receiving this because you booked an appointment with ${org.name}.`,
+          })
+        : null;
+      if (sent?.success) {
         emailed = true;
       }
     }
