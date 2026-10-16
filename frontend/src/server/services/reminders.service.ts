@@ -57,11 +57,8 @@ export async function sendAppointmentReminders(): Promise<number> {
       const sent = credit.allowed
         ? await sendNotificationEmail(appt.user.email, 'Your appointment is coming up', `This is a friendly reminder of your upcoming appointment with ${org.name}. Please check in when you arrive.`, {
             brand: org,
-            details: [
-              ['Service', appt.service.name],
-              ['Where', appt.service.location.name],
-              ['When', `${day} at ${time}`],
-            ],
+            eyebrow: 'Appointment reminder',
+            board: { label: day, value: time, caption: appt.service.name, side: { label: 'Where', value: appt.service.location.name } },
             reason: `You're receiving this because you booked an appointment with ${org.name}.`,
           })
         : null;

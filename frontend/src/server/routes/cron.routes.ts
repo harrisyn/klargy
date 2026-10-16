@@ -77,6 +77,7 @@ router.all('/daily', async (_req, res, next) => {
         for (const admin of admins) {
           await sendNotificationEmail(admin.email, `${org.name}: yesterday at a glance`, digest.answer, {
             brand: org,
+            eyebrow: 'Daily digest',
             action: { href: link, label: 'Open analytics' },
             reason: `You're receiving this daily digest as an admin of ${org.name}.`,
           });

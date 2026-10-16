@@ -158,7 +158,20 @@ export async function notifyEntry(
       }).message;
       const sent = await sendNotificationEmail(entry.user.email, heading, emailText, {
         brand: org,
-        ticket: { number: entry.ticketNumber, service: entry.queue.service.name },
+        eyebrow: 'Queue update',
+        board: {
+          label: type === 'NOW_SERVING' ? 'Now serving' : 'Your ticket',
+          value: entry.ticketNumber,
+          caption: entry.queue.service.name,
+          side:
+            type === 'NOW_SERVING' && extra.servicePointName
+              ? { label: 'Please go to', value: extra.servicePointName }
+              : type === 'QUEUE_DELAYED'
+                ? { label: 'Status', value: 'Paused' }
+                : extra.position
+                  ? { label: 'Your place', value: `${extra.position}` }
+                  : undefined,
+        },
         action: { href: statusUrl, label: type === 'NOW_SERVING' ? 'View your ticket' : 'Track your place' },
         reason: `You're receiving this because you joined a queue at ${org.name}.`,
       });

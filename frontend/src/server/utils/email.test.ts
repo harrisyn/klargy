@@ -62,6 +62,16 @@ describe('email templates', () => {
     expect(text).toContain('Open analytics: https://klargy.example.com/analytics');
   });
 
+  it('shows the board, in amber on Klargy ink, and repeats it in the plain text', () => {
+    const { html, text } = notificationEmail('Now serving C014', "It's your turn.", {
+      board: { label: 'Now serving', value: 'C014', caption: 'GP Consultation', side: { label: 'Please go to', value: 'Room 3' } },
+    });
+    expect(html).toContain('background-color:#0d2a47');
+    expect(html).toMatch(/color:#f0b429;[^"]*">C014</);
+    expect(text).toContain('Now serving: C014 (GP Consultation)');
+    expect(text).toContain('Please go to: Room 3');
+  });
+
   it('keeps the code and link in plain-text versions', () => {
     expect(otpEmail('a@b.co', '482913').text).toContain('482913');
     expect(passwordResetEmail('a@b.co', 'https://k.example.com/r?t=1').text).toContain('https://k.example.com/r?t=1');
