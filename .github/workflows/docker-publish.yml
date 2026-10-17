@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: queue-management
+  IMAGE_NAME: klargy-queue
 
 jobs:
   build-push:
