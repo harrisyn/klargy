@@ -10,10 +10,10 @@
 # the service and pointing the REALTIME_* variables at them).
 services:
   app:
-    image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME}/queue-management:${IMAGE_TAG:-latest}
+    image: harrisyn/klargy-queue:latest
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    # ports:
+    #   - "3000:3000"
     env_file: .env
     environment:
       DATABASE_URL: ${DATABASE_URL:?}
@@ -43,5 +43,5 @@ services:
       SOKETI_DEFAULT_APP_ID: ${REALTIME_APP_ID:?}
       SOKETI_DEFAULT_APP_KEY: ${REALTIME_KEY:?}
       SOKETI_DEFAULT_APP_SECRET: ${REALTIME_SECRET:?}
-    ports:
-      - "6001:6001"
+    # ports:
+    #   - "6001:6001"
