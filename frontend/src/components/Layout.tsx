@@ -26,11 +26,7 @@ import {
   X,
   type LucideIcon,
   Building2,
-  MessageSquare,
-  PackagePlus,
-  Wallet,
-  ImageIcon,
-  Sparkles,
+  LayoutGrid,
 } from 'lucide-react';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useTerms } from '@/hooks/useTerms';
@@ -103,11 +99,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       { href: '/superadmin', label: 'Overview', icon: ShieldCheck, show: isSuperAdmin },
       { href: '/superadmin/organizations', label: 'Organizations', icon: Building2, show: isSuperAdmin },
       { href: '/superadmin/plans', label: 'Plans', icon: CreditCard, show: isSuperAdmin },
-      { href: '/superadmin/addon-pricing', label: 'Add-on pricing', icon: PackagePlus, show: isSuperAdmin },
-      { href: '/superadmin/payment-providers', label: 'Payment providers', icon: Wallet, show: isSuperAdmin },
-      { href: '/superadmin/sms-providers', label: 'Text messages', icon: MessageSquare, show: isSuperAdmin },
-      { href: '/superadmin/file-storage', label: 'File storage', icon: ImageIcon, show: isSuperAdmin },
-      { href: '/superadmin/ai-providers', label: 'AI providers', icon: Sparkles, show: isSuperAdmin },
+      { href: '/superadmin/platform-services', label: 'Platform services', icon: LayoutGrid, show: isSuperAdmin },
     ],
   };
   const groups: { label: string; items: NavItem[] }[] = (platformOnly ? [platformGroup] : [

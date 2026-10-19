@@ -1,0 +1,119 @@
+# Production on Dokploy (Traefik) for klargy.com + *.klargy.com tenant slugs.
+#
+# Routing:
+#   klargy.com, <slug>.klargy.com, admin.klargy.com -> app  (port 3000)
+#   rt.klargy.com                                   -> soketi (port 6001, websockets)
+#
+# Prerequisites (see the notes at the bottom of this file):
+#   1. DNS: A records for `klargy.com` and `*.klargy.com` -> the Dokploy server.
+#   2. A Traefik certificate resolver that uses the DNS-01 challenge. Let's
+#      Encrypt cannot issue the wildcard certificate over HTTP-01, which is all
+#      Dokploy's default `letsencrypt` resolver does.
+#   3. Environment variables below set in the Dokploy "Environment" tab.
+#
+# Do not add Dokploy-managed domains for this compose in the UI: the Traefik
+# labels here own the routing, and a UI domain would add a second router.
+services:
+  app:
+    image: harrisyn/klargy-queue:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:?}
+      CRON_SECRET: ${CRON_SECRET:?}
+      APP_URL: https://klargy.com
+      APP_DOMAIN: klargy.com
+      APP_NAME: ${APP_NAME:-Klargy}
+      SMTP_HOST: ${SMTP_HOST:?}
+      # Server -> Soketi over the private network; browsers -> rt.klargy.com.
+      REALTIME_APP_ID: ${REALTIME_APP_ID:?}
+      REALTIME_KEY: ${REALTIME_KEY:?}
+      REALTIME_SECRET: ${REALTIME_SECRET:?}
+      REALTIME_HOST: soketi
+      REALTIME_PORT: "6001"
+      REALTIME_TLS: "false"
+      REALTIME_PUBLIC_HOST: rt.klargy.com
+      REALTIME_PUBLIC_PORT: "443"
+      REALTIME_PUBLIC_TLS: "true"
+    depends_on:
+      - soketi
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.services.klargy-app.loadbalancer.server.port=3000
+
+      # HTTPS: apex + every single-label subdomain (tenant slugs, admin, ...).
+      - traefik.http.routers.klargy-app.rule=Host(`klargy.com`) || HostRegexp(`^[a-z0-9-]+\.klargy\.com$$`)
+      - traefik.http.routers.klargy-app.entrypoints=websecure
+      - traefik.http.routers.klargy-app.service=klargy-app
+      - traefik.http.routers.klargy-app.tls=true
+      - traefik.http.routers.klargy-app.tls.certresolver=${CERT_RESOLVER:-letsencrypt-dns}
+      - traefik.http.routers.klargy-app.tls.domains[0].main=klargy.com
+      - traefik.http.routers.klargy-app.tls.domains[0].sans=*.klargy.com
+
+      # HTTP -> HTTPS redirect for the same hosts.
+      - traefik.http.routers.klargy-app-http.rule=Host(`klargy.com`) || HostRegexp(`^[a-z0-9-]+\.klargy\.com$$`)
+      - traefik.http.routers.klargy-app-http.entrypoints=web
+      - traefik.http.routers.klargy-app-http.middlewares=klargy-redirect
+      - traefik.http.routers.klargy-app-http.service=klargy-app
+      - traefik.http.middlewares.klargy-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.klargy-redirect.redirectscheme.permanent=true
+    networks:
+      - internal
+      - dokploy-network
+
+  soketi:
+    image: quay.io/soketi/soketi:1.6-16-debian
+    restart: unless-stopped
+    environment:
+      SOKETI_DEFAULT_APP_ID: ${REALTIME_APP_ID:?}
+      SOKETI_DEFAULT_APP_KEY: ${REALTIME_KEY:?}
+      SOKETI_DEFAULT_APP_SECRET: ${REALTIME_SECRET:?}
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.services.klargy-rt.loadbalancer.server.port=6001
+      # Explicit high priority so rt.klargy.com is not swallowed by the
+      # wildcard regex router above.
+      - traefik.http.routers.klargy-rt.rule=Host(`rt.klargy.com`)
+      - traefik.http.routers.klargy-rt.priority=100
+      - traefik.http.routers.klargy-rt.entrypoints=websecure
+      - traefik.http.routers.klargy-rt.service=klargy-rt
+      - traefik.http.routers.klargy-rt.tls=true
+      - traefik.http.routers.klargy-rt.tls.certresolver=${CERT_RESOLVER:-letsencrypt-dns}
+    networks:
+      - internal
+      - dokploy-network
+
+networks:
+  # Private app <-> soketi link, so the `soketi` hostname can't collide with
+  # another Dokploy project on the shared network.
+  internal:
+  dokploy-network:
+    external: true
+
+# --- Notes ---------------------------------------------------------------
+# Required env (Dokploy Environment tab): DATABASE_URL, JWT_SECRET,
+# MASTER_ENCRYPTION_KEY, CRON_SECRET, SMTP_HOST (+ SMTP_PORT/USER/PASS/FROM),
+# REALTIME_APP_ID, REALTIME_KEY, REALTIME_SECRET. Optional: CERT_RESOLVER.
+#
+# Wildcard cert resolver: Dokploy -> Settings -> Server -> Traefik -> File
+# system -> traefik.yml. Add next to the existing `letsencrypt` resolver
+# (example uses Cloudflare; pick your DNS provider's code from
+# https://doc.traefik.io/traefik/https/acme/#providers):
+#
+#   certificatesResolvers:
+#     letsencrypt-dns:
+#       acme:
+#         email: you@klargy.com
+#         storage: /etc/dokploy/traefik/dynamic/acme-dns.json
+#         dnsChallenge:
+#           provider: cloudflare
+#           resolvers: ["1.1.1.1:53"]
+#
+# and give the Traefik container the provider credentials (for Cloudflare:
+# CF_DNS_API_TOKEN, a token with Zone:DNS:Edit on klargy.com). Then restart
+# Traefik. Note: if klargy.com's DNS is not on a Traefik-supported provider,
+# use Cloudflare as DNS-only nameserver, or terminate TLS elsewhere.

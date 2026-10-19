@@ -46,6 +46,12 @@ There are no other platform settings: everything is per organisation, under
 | Delivery receipts | Sent, delivered, read, failed | Queued, sent, delivered, read, failed | Delivered, read (if the server sends them) |
 | Good for | Production | Teams already on Twilio | Pilots, small sites; not an official API, and WhatsApp may restrict numbers used this way |
 
+### Klargy shared number
+
+The platform admin can set up one shared WhatsApp sender under **Platform services → Text & WhatsApp** (WhatsApp Web, Cloud API or Twilio). When one is switched on, **Settings → WhatsApp** offers **Klargy shared number**: nothing to enter, and your consent, fallback and country-code settings still apply.
+
+It only sends. Replies and STOP messages sent to the shared number aren't read, so keep consent on "Only people who opt in". A shared Cloud API or Twilio number has no approved templates, so it can only message people inside WhatsApp's 24-hour window; a linked phone (WhatsApp Web) suits it best. Message credits aren't used.
+
 ### WhatsApp Cloud API
 
 1. In Meta Business Suite, set up WhatsApp and a business phone number. From

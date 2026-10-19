@@ -176,7 +176,7 @@ export default function WhatsAppSettings({ organizationId, allowed, person }: { 
 
       <h3>Provider</h3>
       <div className="mode-cards wa-providers" role="radiogroup" aria-label="WhatsApp provider">
-        {WHATSAPP_PROVIDERS.map((p) => (
+        {WHATSAPP_PROVIDERS.filter((p) => p.id !== 'platform' || info?.platformAvailable || savedProvider === 'platform').map((p) => (
           <label key={p.id} className="mode-card" data-selected={form.provider === p.id}>
             <input type="radio" name="wa-provider" value={p.id} checked={form.provider === p.id} onChange={() => setForm({ ...form, provider: p.id, settings: p.id === savedProvider ? { ...(info?.settings || {}) } : {}, secrets: {}, templates: p.id === savedProvider ? { ...(info?.templates || {}) } : {} })} />
             <strong>{p.label}</strong>
@@ -211,8 +211,12 @@ export default function WhatsAppSettings({ organizationId, allowed, person }: { 
           );
         })}
       </div>
-      <p className="settings-note"><Lock size={13} aria-hidden="true" /> Tokens and secrets are encrypted and never shown again after you save.</p>
+      {form.provider !== 'platform' && <p className="settings-note"><Lock size={13} aria-hidden="true" /> Tokens and secrets are encrypted and never shown again after you save.</p>}
 
+      {form.provider === 'platform' ? (
+        <p className="settings-note">Messages go out from the shared number, so there is no account or webhook to set up here. Replies sent to that number, including STOP, aren’t read, so keep consent on “Only people who opt in”.</p>
+      ) : (
+        <>
       <h3>Webhook</h3>
       <p className="settings-note">
         {form.provider === 'meta_cloud' && 'In your Meta app, under WhatsApp → Configuration, set the callback URL and verify token below, and subscribe to the messages field. Delivery receipts and replies (including STOP) come back here.'}
@@ -223,6 +227,9 @@ export default function WhatsAppSettings({ organizationId, allowed, person }: { 
       {form.provider === 'meta_cloud' && info?.verifyToken && <CopyField label="Verify token" value={info.verifyToken} />}
       {form.provider === 'whatsapp_web' && info?.webhookSecret && <CopyField label="Webhook secret" value={info.webhookSecret} />}
       {form.provider !== savedProvider && <p className="settings-note">Save to get the {form.provider === 'meta_cloud' ? 'verify token' : form.provider === 'whatsapp_web' ? 'webhook secret' : 'settings'} for this provider.</p>}
+
+        </>
+      )}
 
       <h3>Who gets messages</h3>
       <div className="settings-grid">

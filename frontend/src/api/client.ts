@@ -105,6 +105,8 @@ export interface WhatsAppTemplateMappingInfo {
 export interface WhatsAppSettingsInfo {
   configured: boolean;
   webhookUrl: string;
+  /** The platform offers a shared WhatsApp number. */
+  platformAvailable?: boolean;
   provider?: string;
   isEnabled?: boolean;
   settings?: Record<string, string>;
@@ -596,12 +598,34 @@ class ApiClient {
   }
 
   // File Storage Providers (superadmin)
+  async getPlatformWhatsApp(): Promise<{
+    configured: boolean;
+    isEnabled: boolean;
+    provider: string | null;
+    settings: Record<string, string>;
+    secretsMasked: Record<string, string | null>;
+    orgsUsing?: number;
+  }> {
+    const { data } = await this.client.get('/superadmin/platform-whatsapp');
+    return data;
+  }
+
+  async savePlatformWhatsApp(payload: { provider: string; isEnabled: boolean; settings: Record<string, string>; secrets: Record<string, string> }) {
+    const { data } = await this.client.put('/superadmin/platform-whatsapp', payload);
+    return data;
+  }
+
+  async testPlatformWhatsApp(to?: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+    const { data } = await this.client.post('/superadmin/platform-whatsapp/test', { to });
+    return data;
+  }
+
   async getFileStorageProviders() {
     const { data } = await this.client.get('/superadmin/file-storage');
     return data;
   }
 
-  async saveFileStorageProvider(provider: string, payload: { publicKey?: string; secretKey: string; isActive: boolean }) {
+  async saveFileStorageProvider(provider: string, payload: { publicKey?: string; secretKey?: string; isActive: boolean; settings?: Record<string, unknown> }) {
     const { data } = await this.client.put(`/superadmin/file-storage/${provider}`, payload);
     return data;
   }

@@ -3,11 +3,11 @@ import { Request, Response, NextFunction } from 'express';
 import type { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { mask } from '../lib/encryption';
-import { assertPublicUrl } from '../lib/urlSafety';
 import { buildAppUrl } from '../config/appConfig';
 import { loadWhatsAppConfig, providerFor, readSecrets, whatsappWebhookUrl, writeSecrets } from '../services/whatsapp/config';
 import { inSessionWindow, isKnownVariable, normalizeWhatsAppPhone, renderTemplateParams, templateUsable } from '../services/whatsapp/util';
 import { handleWhatsAppWebhook } from '../services/whatsapp/webhook';
+import { validateSender } from '../services/whatsapp/validate';
 import {
   WHATSAPP_TEMPLATE_KEYS,
   providerSpec,
@@ -34,7 +34,9 @@ type ConfigRow = NonNullable<Awaited<ReturnType<typeof prisma.whatsAppConfig.fin
 
 async function view(organizationId: string, row: ConfigRow | null) {
   const webhookUrl = whatsappWebhookUrl(organizationId);
-  if (!row) return { configured: false, webhookUrl };
+  // Whether the "Klargy shared number" choice can be offered.
+  const platformAvailable = !!(await prisma.platformWhatsAppConfig.findUnique({ where: { id: 'platform' }, select: { isEnabled: true } }))?.isEnabled;
+  if (!row) return { configured: false, webhookUrl, platformAvailable };
   const spec = providerSpec(row.provider);
   const secrets = readSecrets(row.secrets);
   const secretsMasked: Record<string, string | null> = {};
@@ -45,6 +47,7 @@ async function view(organizationId: string, row: ConfigRow | null) {
   ]);
   return {
     configured: true,
+    platformAvailable,
     provider: row.provider,
     isEnabled: row.isEnabled,
     settings: row.settings,
@@ -114,34 +117,11 @@ export const upsertWhatsAppConfig = async (req: Request, res: Response, next: Ne
     const existing = await prisma.whatsAppConfig.findUnique({ where: { organizationId } });
     const sameProvider = existing?.provider === spec.id;
 
-    const settings: Record<string, string> = {};
-    for (const f of spec.fields) {
-      const value = String(body.settings?.[f.key] ?? '').trim().slice(0, 500);
-      if (value) settings[f.key] = value;
-      else if (f.required) return res.status(400).json({ error: `Enter the ${f.label.toLowerCase()}.` });
-    }
-    if (spec.id === 'twilio' && !settings.from && !settings.messagingServiceSid) {
-      return res.status(400).json({ error: 'Twilio needs a WhatsApp sender number or a Messaging Service SID.' });
-    }
-    if (spec.id === 'twilio' && !/^AC[0-9a-f]{32}$/i.test(settings.accountSid)) return res.status(400).json({ error: 'The account SID starts with AC.' });
-    if (spec.id === 'whatsapp_web') {
-      try {
-        await assertPublicUrl(settings.baseUrl);
-      } catch (err: any) {
-        return res.status(400).json({ error: `Server address: ${err.message}` });
-      }
-      settings.baseUrl = settings.baseUrl.replace(/\/$/, '');
-    }
-
     // Blank secrets keep what's saved (for the same provider).
     const saved = sameProvider ? readSecrets(existing?.secrets) : {};
-    const secrets: Record<string, string> = {};
-    for (const f of spec.secrets) {
-      const value = String(body.secrets?.[f.key] ?? '').trim().slice(0, 2000);
-      if (value) secrets[f.key] = value;
-      else if (saved[f.key]) secrets[f.key] = saved[f.key];
-      else if (f.required) return res.status(400).json({ error: `Enter the ${f.label.toLowerCase()}.` });
-    }
+    const checked = await validateSender(spec, body, saved);
+    if (!checked.ok) return res.status(400).json({ error: checked.error });
+    const { settings, secrets } = checked;
     if (spec.id === 'whatsapp_web') secrets.webhookSecret = saved.webhookSecret || randomToken();
 
     const { templates, error } = spec.templates ? cleanTemplates(body.templates, spec.id) : { templates: {} };

@@ -1,4 +1,4 @@
-export type FileStorageProviderName = 'uploadcare';
+export type FileStorageProviderName = 'uploadcare' | 's3';
 
 export interface UploadedFile {
   fileId: string;

@@ -16,5 +16,5 @@ export default function SuperadminLayout({ children }: { children: React.ReactNo
 
   if (loading) return <div style={{ padding: '3rem', textAlign: 'center' }}><div className="spinner" /></div>;
   if (!user || user.role !== 'SUPER_ADMIN') return null;
-  return <Layout>{children}</Layout>;
+  return <Layout><div className="sa-compact">{children}</div></Layout>;
 }

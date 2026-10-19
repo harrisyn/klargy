@@ -1,7 +1,10 @@
 // WhatsApp channel: what the settings page shows and the server checks.
 // Shared by the admin UI and the API so both agree on fields and keys.
 
-export type WhatsAppProviderId = 'meta_cloud' | 'twilio' | 'whatsapp_web';
+export type WhatsAppProviderId = 'meta_cloud' | 'twilio' | 'whatsapp_web' | 'platform';
+
+/** Providers a platform admin can configure (everything but the shared-number choice). */
+export const PLATFORM_SENDER_IDS: WhatsAppProviderId[] = ['whatsapp_web', 'meta_cloud', 'twilio'];
 
 export interface WhatsAppField {
   key: string;
@@ -61,6 +64,14 @@ export const WHATSAPP_PROVIDERS: WhatsAppProviderSpec[] = [
       { key: 'deviceId', label: 'Device ID', placeholder: 'default' },
     ],
     secrets: [{ key: 'basicAuth', label: 'Basic auth', placeholder: 'username:password', hint: 'Only if the server asks for it (WHATSAPP_API_BASIC_AUTH_CREDENTIAL).' }],
+    templates: false,
+  },
+  {
+    id: 'platform',
+    label: 'Klargy shared number',
+    note: 'Send from the WhatsApp number Klargy provides, with nothing to set up. Plain messages only, and replies to that number aren’t read here.',
+    fields: [],
+    secrets: [],
     templates: false,
   },
 ];

@@ -177,3 +177,15 @@ Branch: `arch-review-fixes`. Origin: architecture review of 2026-09-25.
 - [x] `alert()` replaced with toasts (`lib/toast.ts`) that show the server's message
 - [ ] Delete temp `superadmin@qms.local` dev account before any non-dev use
 - [ ] Real-money Stripe/Paystack checkout verification with test-mode keys
+
+## Platform services (2026-10-19)
+
+- [x] One superadmin page (**Platform services**) replaces Add-on pricing, Payment providers, Text messages, File storage and AI providers: tile grid + settings panel, driven by definitions in `components/platform/registry.ts`; old URLs redirect
+- [x] Superadmin pages are denser (`.sa-compact`, 80% scale)
+- [x] S3-compatible file storage (AWS S3, MinIO, R2, Spaces...) with hand-rolled SigV4; verified against a real S3 server (accepts the right secret, rejects a wrong one)
+- [x] Shared WhatsApp number: platform sender (WhatsApp Web, Cloud API or Twilio); organizations choose "Klargy shared number" in Settings → WhatsApp
+- [x] `seed_base_plans` migration: Starter, Pro, Sandbox and credit allowances reach production; Pro gets `whatsappNotifications`
+- [ ] Shared number is send-only: replies and STOP sent to it aren't routed to an organization yet
+- [ ] Shared number messages aren't metered; decide whether they use credits
+- [ ] Price AI/SMS/storage as add-ons (add-on tiles still cover locations, seats and display media only)
+

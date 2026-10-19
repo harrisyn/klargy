@@ -21,6 +21,7 @@ import { listPaymentProviders, upsertPaymentProvider, testPaymentProvider } from
 import { listAddOnPricing, updateAddOnPricing } from '../controllers/addOnPricing.controller';
 import { listFileStorageProviders, upsertFileStorageProvider, testFileStorageProvider } from '../controllers/fileStorageProvider.controller';
 import { listAiProviders, upsertAiProvider, testAiProvider } from '../controllers/ai.controller';
+import { getPlatformWhatsApp, savePlatformWhatsApp, testPlatformWhatsApp } from '../controllers/platformWhatsApp.controller';
 
 const router = Router();
 
@@ -64,6 +65,11 @@ router.post('/sms-providers/:provider/test', testSmsProvider);
 router.get('/file-storage', listFileStorageProviders);
 router.put('/file-storage/:provider', upsertFileStorageProvider);
 router.post('/file-storage/:provider/test', testFileStorageProvider);
+
+// Shared WhatsApp sender
+router.get('/platform-whatsapp', getPlatformWhatsApp);
+router.put('/platform-whatsapp', savePlatformWhatsApp);
+router.post('/platform-whatsapp/test', testPlatformWhatsApp);
 
 // AI (LLM) provider configuration
 router.get('/ai-providers', listAiProviders);

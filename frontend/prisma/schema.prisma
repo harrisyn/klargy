@@ -669,10 +669,12 @@ model PaymentProviderConfig {
 
 model FileStorageProviderConfig {
   id            String   @id @default(uuid())
-  provider      String   // "uploadcare"
+  provider      String   // "uploadcare" | "s3"
   isActive      Boolean  @default(false)
-  publicKey     String?
+  publicKey     String?  // Uploadcare public key, S3 access key ID
   secretKey     String   // encrypted at rest, same as PaymentProviderConfig
+  // Non-secret provider settings. s3: {endpoint?, region, bucket, publicBaseUrl, pathStyle, prefix?}
+  settings      Json     @default("{}")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -1094,6 +1096,19 @@ model DisplayPlaylistItem {
 // An organisation's own WhatsApp sender (Settings → WhatsApp). One per org.
 // provider: meta_cloud (WhatsApp Cloud API), twilio, or whatsapp_web (a
 // self-hosted go-whatsapp-web-multidevice server, as Serenity uses).
+// The platform's shared WhatsApp sender (Platform services → Text & WhatsApp).
+// One row. Organisations opt in by choosing "Klargy shared number" in
+// Settings → WhatsApp; they keep their own consent and fallback settings.
+model PlatformWhatsAppConfig {
+  id        String   @id @default("platform")
+  provider  String
+  isEnabled Boolean  @default(false)
+  // Same shapes as WhatsAppConfig.settings / .secrets.
+  settings  Json     @default("{}")
+  secrets   String?
+  updatedAt DateTime @updatedAt
+}
+
 model WhatsAppConfig {
   id                 String       @id @default(uuid())
   organizationId     String       @unique

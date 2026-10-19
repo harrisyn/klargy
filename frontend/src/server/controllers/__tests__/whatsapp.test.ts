@@ -8,6 +8,7 @@ const db = vi.hoisted(() => ({
   whatsAppConfig: { findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
   whatsAppContact: { count: vi.fn(async () => 0), findUnique: vi.fn() },
   organization: { findUnique: vi.fn(async () => ({ name: 'Nyaho' })) },
+  platformWhatsAppConfig: { findUnique: vi.fn(async () => null) },
 }));
 vi.mock('../../lib/prisma', () => ({ default: db, prisma: db }));
 
@@ -95,7 +96,7 @@ describe('upsertWhatsAppConfig', () => {
   it('GET says when nothing is set up', async () => {
     db.whatsAppConfig.findUnique.mockResolvedValue(null);
     const res = await call(getWhatsAppConfig, undefined);
-    expect(res.json.mock.calls[0][0]).toEqual({ configured: false, webhookUrl: expect.stringContaining('/webhooks/whatsapp/org1') });
+    expect(res.json.mock.calls[0][0]).toEqual({ configured: false, platformAvailable: false, webhookUrl: expect.stringContaining('/webhooks/whatsapp/org1') });
   });
 });
 
