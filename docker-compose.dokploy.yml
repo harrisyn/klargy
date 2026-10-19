@@ -16,6 +16,9 @@
 services:
   app:
     image: harrisyn/klargy-queue:latest
+    # `up` alone never re-pulls an existing :latest image, so a redeploy would
+    # restart the old build (and skip new migrations).
+    pull_policy: always
     restart: unless-stopped
     env_file: .env
     environment:
