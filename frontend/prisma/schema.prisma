@@ -58,6 +58,13 @@ model Organization {
   servicePoints         ServicePoint[]
   addOns                OrganizationAddOn[]
   creditLedgerEntries   CreditLedgerEntry[]
+  walletLedgerEntries   WalletLedgerEntry[]
+  // Taking payment for bookings (docs/superpowers/specs/2026-10-20-table-seat-booking-and-payments-review.md)
+  currency       String                  @default("USD")
+  payoutDetails         String?                 // where payouts go; encrypted at rest
+  paymentProviders      OrgPaymentProvider[]
+  payoutLedgerEntries   PayoutLedgerEntry[]
+  payoutRequests        PayoutRequest[]
   customDomain          CustomDomain?
   impersonationLogs     ImpersonationLog[]
   auditLogs             AuditLog[]
@@ -123,6 +130,8 @@ model Location {
   updatedAt         DateTime       @updatedAt
   organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   services          Service[]
+  rooms             Room[]
+  diningTables      DiningTable[]
   publicCode        String?        @unique
   // Lobby screen: ticker + media rotation. See DisplayMedia.
   // {"ticker":{"enabled":true,"messages":["..."],"speed":"normal"},
@@ -179,6 +188,9 @@ model ServicePointInstance {
   servicePointService    ServicePointService @relation(fields: [servicePointServiceId], references: [id], onDelete: Cascade)
   occupiedBy             User?               @relation("OccupiedInstances", fields: [occupiedByUserId], references: [id], onDelete: SetNull)
   servingEntries         QueueEntry[]        @relation("InstanceServingEntries") // Entries being served at this instance
+  // The room this desk is in, if any.
+  roomId                 String?
+  room                   Room?               @relation(fields: [roomId], references: [id], onDelete: SetNull)
 
   @@unique([servicePointServiceId, instanceNumber])
   @@index([servicePointServiceId, isActive])
@@ -235,6 +247,32 @@ model Service {
   // Payment gate: someone joining this service waits "awaiting payment"
   // (not callable) until cleared by staff or the connected EMR.
   requiresClearance Boolean     @default(false)
+  // Public join page: WALK_IN (join the line now), APPOINTMENT (book a time)
+  // or BOTH. Staff can always book appointments for anyone.
+  bookingMode     String        @default("WALK_IN")
+  // BOOKING: a slot holds N bookings. PERSON: a slot holds N people (seats, covers)
+  // and the customer says how many they are.
+  bookingUnit     String        @default("BOOKING")
+  minPartySize    Int           @default(1)
+  maxPartySize    Int           @default(8)
+  // False: only staff-made sessions are bookable (events, classes, tickets).
+  recurringSlots  Boolean       @default(true)
+  // Price per booking or per person (priceBasis); a session can set its own.
+  price           Decimal?      @db.Decimal(12, 2)
+  priceBasis      String        @default("BOOKING")
+  // NONE, DEPOSIT (depositPercent up front) or FULL, paid when booking online.
+  paymentMode     String        @default("NONE")
+  depositPercent  Int           @default(30)
+  // Cancelling at least this long before the start refunds what was paid.
+  refundCutoffHours Int         @default(24)
+  // Refund by notice, best first: [{"hours":48,"percent":100},{"hours":24,"percent":50}].
+  // Empty/null: the full refund applies up to refundCutoffHours, none after.
+  refundTiers     Json?
+  // AUTO: a booking is given a free table that fits its party (see services/tables.service.ts).
+  tableMode       String        @default("NONE")
+  // Delivered in this room (a treatment room, a private dining room): its rules and rates apply.
+  roomId          String?
+  room            Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   location        Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -286,6 +324,11 @@ model Slot {
   endTime      DateTime
   capacity     Int           @default(1)
   bookedCount  Int           @default(0)
+  // A one-off session made by staff (event, class, tickets) rather than a
+  // slot generated from opening hours.
+  isSession    Boolean       @default(false)
+  label        String?
+  price        Decimal?      @db.Decimal(12, 2)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   queue        Queue         @relation(fields: [queueId], references: [id], onDelete: Cascade)
@@ -385,6 +428,31 @@ model Appointment {
   status        String    @default("SCHEDULED") // SCHEDULED, CONFIRMED, CHECKED_IN, CANCELLED, NO_SHOW, COMPLETED
   rescheduledAt DateTime?
   notes         String?
+  // STAFF (booked at the desk) or ONLINE (booked on the public page).
+  source        String    @default("STAFF")
+  // People in the booking (seats/covers); counts against the slot's capacity
+  // when the service's bookingUnit is PERSON, else it is information only.
+  partySize     Int       @default(1)
+  // Online payment. paymentStatus: NONE, PENDING, PAID, PARTIAL_REFUND, REFUNDED, EXPIRED, FAILED.
+  amount        Decimal?  @db.Decimal(12, 2)
+  amountDue     Decimal?  @db.Decimal(12, 2)
+  amountPaid    Decimal?  @db.Decimal(12, 2)
+  currency      String?
+  paymentStatus String    @default("NONE")
+  paymentSource String?   // ORG (the organization's own keys) or PLATFORM (collected on its behalf)
+  paymentProvider String?
+  paymentRef    String?   @unique
+  paymentIntentRef String?
+  // The provider's checkout page, so an abandoned payment can be resumed while the hold lasts.
+  paymentUrl    String?
+  // The tables or seats the booking holds (usually one).
+  tables        BookingTable[]
+  // The room the booking is in (its table's, else the service's): its rules and rate applied.
+  roomId        String?
+  room          Room?        @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  paymentExpiresAt DateTime?
+  // Secret in the customer's own link to view, move or cancel an online booking.
+  manageToken   String?   @unique
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -395,6 +463,7 @@ model Appointment {
   @@index([userId])
   @@index([serviceId])
   @@index([startTime])
+  @@index([paymentStatus, paymentExpiresAt])
 }
 
 enum UserRole {
@@ -610,6 +679,7 @@ model SubscriptionPlan {
   subscriptions         OrganizationSubscription[]
   creditAllowances      PlanCreditAllowance[]
   addOnPricingOverrides PlanAddOnPricingOverride[]
+  currencyPrices        PlanCurrencyPrice[]
 
   @@index([code])
   @@index([isActive])
@@ -640,6 +710,20 @@ model OrganizationSubscription {
   // The provider's own recurring-subscription ID (renamed from externalPaymentId)
   externalProviderSubscriptionId String?
   
+  // Wallet billing: the subscription renews itself from the organization's
+  // wallet (WalletLedgerEntry) instead of a payment provider. Set when a
+  // superadmin bumps/prices the plan or the org pays from its wallet.
+  walletManaged         Boolean            @default(false)
+  // Negotiated price per billingCycle; null = the plan's list price
+  customPrice           Decimal?
+  // Complimentary/temporary plan bump: at planOverrideUntil either go back to
+  // planOverrideRevertPlanId (REVERT) or stay on the plan at customPrice
+  // (KEEP_AT_CUSTOM_PRICE)
+  planOverrideUntil          DateTime?
+  planOverrideRevertPlanId   String?
+  planOverrideRevertPeriodEnd DateTime?
+  planOverrideEndBehavior    String?       // "REVERT" | "KEEP_AT_CUSTOM_PRICE"
+
   // Usage tracking (updated periodically)
   usageStats            Json?              // {"locationsUsed": 2, "usersUsed": 5, "entriesThisMonth": 1234}
   
@@ -763,6 +847,43 @@ model CreditLedgerEntry {
   createdAt      DateTime     @default(now())
 
   @@index([organizationId, creditType, createdAt])
+}
+
+// Append-only money ledger for an organization's wallet. Positive = top-up
+// (superadmin credit), negative = charge (plan enrolment/renewal) or a
+// superadmin debit. Balance = sum of entries in one currency.
+model WalletLedgerEntry {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  amount         Decimal      @db.Decimal(12, 2)
+  currency       String
+  kind           String       // "TOPUP" | "DEBIT" | "PLAN_CHARGE"
+  reason         String
+  actorUserId    String?
+  // Payment provider event that produced this entry ("stripe:evt_..."); unique so a
+  // retried webhook can't credit twice
+  externalRef    String?      @unique
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, currency, createdAt])
+}
+
+// A plan's price in another currency, set by hand. Without a row, the price
+// is the plan's own price converted at the platform's rate for that currency
+// (PlatformSetting "currencies"; see lib/currency.ts).
+model PlanCurrencyPrice {
+  id             String           @id @default(uuid())
+  planId         String
+  plan           SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  currency       String
+  priceMonthly   Decimal          @db.Decimal(12, 2)
+  priceQuarterly Decimal          @db.Decimal(12, 2)
+  priceYearly    Decimal          @db.Decimal(12, 2)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([planId, currency])
 }
 
 // Per-plan override of the global AddOnPricing default. Missing row for a
@@ -1000,6 +1121,158 @@ model SetupToken {
   id             String   @id
   encryptedToken String
   createdAt      DateTime @default(now())
+}
+
+// A room within a location (dining room, terrace, treatment room, private
+// suite). It holds tables and desks, and can have its own rules (who may book
+// it, party size, hours) and rates (what it costs on top of, or instead of,
+// the service's price; deposit and refund terms).
+model Room {
+  id          String   @id @default(uuid())
+  locationId  String
+  location    Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+
+  // Rules. Null = no extra rule.
+  onlineBookable Boolean @default(true) // false: staff book it, the public page doesn't offer it
+  minPartySize   Int?
+  maxPartySize   Int?
+  openTime       String? // "18:00"; with closeTime, bookings start within these hours
+  closeTime      String?
+  activeDays     String? // "4,5,6"; null = the service's days
+  // Several free tables or seats may be given to one big party when no single one fits.
+  allowCombine   Boolean @default(true)
+
+  // The floor plan: a canvas of this size (any units) with an optional picture of the real room behind it.
+  layoutWidth       Int     @default(1000)
+  layoutHeight      Int     @default(700)
+  layoutImageUrl    String?
+  layoutImageFileId String?
+
+  // Rates. INHERIT: the service's price. OVERRIDE: this room's price replaces it.
+  // SURCHARGE: this room's price is added to it.
+  priceMode         String   @default("INHERIT")
+  price             Decimal? @db.Decimal(12, 2)
+  priceBasis        String   @default("BOOKING") // BOOKING | PERSON
+  // Payment terms for bookings in this room; null = the service's.
+  paymentMode       String?
+  depositPercent    Int?
+  refundCutoffHours Int?
+  refundTiers       Json?
+
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  tables       DiningTable[]
+  services     Service[]
+  instances    ServicePointInstance[]
+  appointments Appointment[]
+
+  @@unique([locationId, name])
+}
+
+// A table, chair or court that bookings are given: named, with seats.
+// Shared by every service at the location, so two services never double-book it.
+model DiningTable {
+  id           String        @id @default(uuid())
+  locationId   String
+  location     Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  roomId       String?
+  room         Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  name         String
+  seats        Int
+  area         String?
+  sortOrder    Int           @default(0)
+  isActive     Boolean       @default(true)
+  // Place on the room's floor plan (centre, in layout units); null = not placed yet.
+  x            Float?
+  y            Float?
+  width        Float         @default(90)
+  height       Float         @default(90)
+  rotation     Float         @default(0)
+  shape        String        @default("RECT") // RECT | ROUND
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  bookings     BookingTable[]
+
+  @@unique([locationId, name])
+}
+
+// Which tables or seats a booking holds.
+model BookingTable {
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  tableId       String
+  table         DiningTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@id([appointmentId, tableId])
+  @@index([tableId])
+}
+
+// An organization's own payment account for taking booking payments (paid
+// plans). Money goes straight to the organization. Keys encrypted at rest.
+model OrgPaymentProvider {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider       String       // "stripe" | "paystack"
+  isActive       Boolean      @default(true)
+  publicKey      String?
+  secretKey      String
+  webhookSecret  String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, provider])
+}
+
+// Append-only ledger of money the platform collected for an organization
+// (payments made with no organization keys). Positive = sale, negative = fee,
+// refund or payout. A positive entry counts as "available" once availableAt
+// has passed (the review hold); everything else is available immediately.
+model PayoutLedgerEntry {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  amount         Decimal      @db.Decimal(12, 2)
+  currency       String
+  kind           String       // SALE | FEE | REFUND | PAYOUT | PAYOUT_REVERSAL | ADJUSTMENT
+  reason         String
+  appointmentId  String?
+  payoutRequestId String?
+  availableAt    DateTime
+  externalRef    String?      @unique
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, currency, availableAt])
+}
+
+model PayoutRequest {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  amount         Decimal      @db.Decimal(12, 2)
+  currency       String
+  status         String       @default("REQUESTED") // REQUESTED | PAID | REJECTED
+  details        String?      // snapshot of the organization's payout details (encrypted)
+  note           String?      // reviewer's note or the transfer reference
+  requestedBy    String?
+  reviewedBy     String?
+  requestedAt    DateTime     @default(now())
+  reviewedAt     DateTime?
+
+  @@index([organizationId, requestedAt])
+  @@index([status])
+}
+
+// Small key/value store for platform-wide settings edited by the superadmin
+// (payout hold days, platform fee...).
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
 }
 
 model AiProviderConfig {

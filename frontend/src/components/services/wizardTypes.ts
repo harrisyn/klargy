@@ -16,6 +16,7 @@ export interface WizardData {
   requiresPhone: boolean;
   allowAnonymous: boolean;
   requiresClearance: boolean;
+  bookingMode: 'WALK_IN' | 'APPOINTMENT' | 'BOTH';
   displayMode: '' | 'TICKET_ONLY' | 'NAME_AND_TICKET' | 'FULL_INFO';
 
   // Step 2: Locations
@@ -42,6 +43,7 @@ export const initialWizardData: WizardData = {
   requiresPhone: false,
   allowAnonymous: false,
   requiresClearance: false,
+  bookingMode: 'WALK_IN',
   displayMode: '',
   locationScope: 'specific',
   selectedLocationId: '',

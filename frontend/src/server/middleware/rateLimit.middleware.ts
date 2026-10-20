@@ -56,6 +56,9 @@ export const limits = {
   login: rateLimit({ name: 'login', windowSeconds: 15 * 60, max: 10, key: bodyEmail }),
   sendCode: rateLimit({ name: 'send-code', windowSeconds: 60 * 60, max: 5, key: bodyEmail }),
   verifyCode: rateLimit({ name: 'verify-code', windowSeconds: 15 * 60, max: 20 }),
+  // Creating or changing bookings; reading slots/bookings is cheaper.
+  publicBook: rateLimit({ name: 'public-book', windowSeconds: 60 * 60, max: 30 }),
+  publicBookRead: rateLimit({ name: 'public-book-read', windowSeconds: 60, max: 120 }),
   // Guessing the setup token: a handful of tries per hour per address.
   setup: rateLimit({ name: 'setup', windowSeconds: 60 * 60, max: 10 }),
   registerOrg: rateLimit({ name: 'register-org', windowSeconds: 60 * 60, max: 10 }),

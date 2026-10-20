@@ -4,11 +4,24 @@ import prisma from '../lib/prisma';
 import { getProvider, ProviderNotActiveError } from '../services/payments';
 import { ProviderName, AddOnResourceType, AddOnBillingMode } from '../services/payments/types';
 import { returnBaseUrl } from '../lib/cors';
+import { convertAmount, getCurrencyConfig } from '../services/currency.service';
 
 // Resolves the per-unit price for one add-on purchase: a plan-specific
 // override takes precedence over the global default. See
 // docs/superpowers/specs/2026-08-25-plan-builder-design.md.
 export async function resolveAddOnUnitPrice(
+  planId: string | null,
+  resourceType: AddOnResourceType,
+  billingMode: AddOnBillingMode,
+  targetCurrency?: string | null
+): Promise<{ unitPrice: number; currency: string } | null> {
+  const base = await resolveBaseAddOnUnitPrice(planId, resourceType, billingMode);
+  if (!base || !targetCurrency || targetCurrency === base.currency) return base;
+  const converted = convertAmount(base.unitPrice, base.currency, targetCurrency, await getCurrencyConfig());
+  return converted === null ? base : { unitPrice: converted, currency: targetCurrency };
+}
+
+async function resolveBaseAddOnUnitPrice(
   planId: string | null,
   resourceType: AddOnResourceType,
   billingMode: AddOnBillingMode
@@ -70,11 +83,11 @@ export const createAddOnCheckout = async (req: Request, res: Response, next: Nex
 
     const organization = await prisma.organization.findUnique({
       where: { id: user.organizationId },
-      select: { subscription: { select: { planId: true } } },
+      select: { currency: true, subscription: { select: { planId: true } } },
     });
     const planId = organization?.subscription?.planId ?? null;
 
-    const pricing = await resolveAddOnUnitPrice(planId, resourceType, billingMode);
+    const pricing = await resolveAddOnUnitPrice(planId, resourceType, billingMode, organization?.currency);
     if (!pricing) {
       return res.status(500).json({ error: 'Add-on pricing is not configured' });
     }

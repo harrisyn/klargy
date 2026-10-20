@@ -156,7 +156,7 @@ const LoginPage: React.FC = () => {
                   type="text"
                   value={workspaceSlug}
                   onChange={(e) => setWorkspaceSlug(e.target.value)}
-                  placeholder="your-clinic"
+                  placeholder="your-business"
                   autoFocus
                   autoComplete="off"
                   autoCapitalize="off"

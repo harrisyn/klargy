@@ -1,6 +1,6 @@
 # @klargy/connect
 
-TypeScript client for **Klargy Connect v1**, the API an EMR (or any system that sends people into a queue) uses to work with Klargy.
+TypeScript client for **Klargy Connect v1**, the API a CRM, point-of-sale, reservations system, EMR (or any system that sends people into a queue) uses to work with Klargy.
 
 - `KlargyConnect`: a typed client with one method per endpoint. It retries calls that are safe to repeat, sends `Idempotency-Key`s, and throws typed `ConnectError`s.
 - `verifyWebhook` and `verifyLookupRequest`: check Klargy's signed webhooks and patient lookup calls. Lookup response helpers are included.

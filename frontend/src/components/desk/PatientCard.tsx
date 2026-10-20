@@ -6,8 +6,8 @@ import api from '@/api/client';
 import type { PatientLookup } from '@/types';
 
 /**
- * The EMR's record for the person at the desk (Klargy Connect phase 4):
- * who they are and whether their cover is good, as the EMR says. Shown only
+ * The system's record for the person at the desk (Klargy Connect phase 4):
+ * who they are and whether their cover is good, as the system says. Shown only
  * when the patient came from a connected EMR. Staff can also check an MR or
  * member number someone gives them.
  */
@@ -59,7 +59,7 @@ function Verify({ patientRef }: { patientRef?: string }) {
     setResult(null);
     try {
       const found = await api.connectLookup({ identifierType: type, identifier: value.trim() });
-      if (!found.matched || !found.patient) setResult({ tone: 'bad', text: 'Not matched: the EMR has no patient with that number.' });
+      if (!found.matched || !found.patient) setResult({ tone: 'bad', text: 'Not matched: the system has no patient with that number.' });
       else if (patientRef && found.patient.ref && found.patient.ref !== patientRef) {
         setResult({ tone: 'bad', text: `Matched someone else: ${found.patient.displayName || 'another patient'}.` });
       } else setResult({ tone: 'good', text: `Matched${found.patient.displayName ? `: ${found.patient.displayName}` : ''}.` });
@@ -104,7 +104,7 @@ export default function PatientCard({ entryId }: { entryId: string }) {
       const { status, message } = errorOf(err);
       // Not from a connected EMR, or no lookup set up: nothing to show.
       if (status === 404 || status === 409 || status === 403) setState({ kind: 'hidden' });
-      else setState({ kind: 'failed', message: message || 'Couldn’t reach the EMR.' });
+      else setState({ kind: 'failed', message: message || 'Couldn’t reach the system.' });
     }
   }, [entryId]);
 

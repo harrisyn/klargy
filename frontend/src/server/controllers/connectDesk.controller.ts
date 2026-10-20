@@ -12,7 +12,7 @@ import { entryViews } from './connectQueue.controller';
 import { klargyIdFor, linkRef } from '../services/externalRefs.service';
 
 // Klargy Connect v1, phase 3 (docs/connect/v1.md section 6): the staff desk
-// opened inside the other system. The EMR's server asks for a one-time code
+// opened inside the other system. The system's server asks for a one-time code
 // for the practitioner signed in to it; the desk page exchanges the code for
 // a normal staff session.
 
@@ -45,7 +45,7 @@ function splitName(name: string): { firstName: string; lastName: string } {
 const STAFF_SELECT = { id: true, isActive: true, role: true } as const;
 
 /**
- * The Klargy staff member for an EMR practitioner: by the existing staff
+ * The Klargy staff member for a system practitioner: by the existing staff
  * reference, else by email among the organisation's active staff (and the
  * reference is recorded), else a newly registered SERVICE_STAFF user who can
  * only sign in through a desk launch.
@@ -96,13 +96,13 @@ export async function resolveLaunchStaff(
 
   // The practitioner's own email when nobody in Klargy has it yet (it may
   // belong to a patient, or to someone in another organisation), else an
-  // internal placeholder; the EMR's email is kept in identityData either way.
+  // internal placeholder; the system's email is kept in identityData either way.
   const emailFree = email ? !(await prisma.user.findUnique({ where: { email }, select: { id: true } })) : false;
   const { firstName, lastName } = splitName(staff.name);
   const user = await prisma.user.create({
     data: {
       email: emailFree && email ? email : `connect_staff_${crypto.randomUUID()}@guest.qms.local`,
-      // Never a usable password: these staff only come in through the EMR.
+      // Never a usable password: these staff only come in through the system.
       password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
       firstName,
       lastName,
@@ -202,8 +202,8 @@ export const launchDesk = async (req: Request, res: Response, next: NextFunction
 
 /**
  * GET /connect/v1/staff/{staffRef}/desk: the room (service point) the staff
- * member is signed in to now, so the EMR can check it without relying on
- * having seen a servicepoint.opened webhook. `staffRef` is the EMR's
+ * member is signed in to now, so the system can check it without relying on
+ * having seen a servicepoint.opened webhook. `staffRef` is the system's
  * practitioner id (its `staff` mapping); Klargy's own user id is also
  * accepted. When they are signed in to several desks, the latest one.
  */
@@ -265,7 +265,7 @@ export const getStaffDesk = async (req: Request, res: Response, next: NextFuncti
 };
 
 const invalidCode = (res: Response) =>
-  res.status(400).json({ error: 'This desk link has expired or was already used. Open the desk again from your EMR.', code: 'INVALID_LAUNCH_CODE' });
+  res.status(400).json({ error: 'This desk link has expired or was already used. Open the desk again from your system.', code: 'INVALID_LAUNCH_CODE' });
 
 /**
  * POST /auth/desk-launch {code}: public. Uses the code up (once, within its
@@ -339,7 +339,7 @@ async function launchFor(req: Request, res: Response) {
 }
 
 /** GET /desk-launches/:launchId/desks/:instanceId: the room behind a desk,
- * with the EMR's id for it. */
+ * with the system's id for it. */
 export const getLaunchDesk = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const launch = await launchFor(req, res);
@@ -363,7 +363,7 @@ export const getLaunchDesk = async (req: Request, res: Response, next: NextFunct
 };
 
 /** GET /desk-launches/:launchId/entries/:entryId: the Connect entry object
- * (with the integration's refs), for the desk to pass to the EMR. */
+ * (with the integration's refs), for the desk to pass to the system. */
 export const getLaunchEntry = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const launch = await launchFor(req, res);

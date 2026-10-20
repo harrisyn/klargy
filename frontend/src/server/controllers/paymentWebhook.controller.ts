@@ -3,6 +3,8 @@ import prisma from '../lib/prisma';
 import { getProvider } from '../services/payments';
 import { wasAlreadyProcessed, markProcessed } from '../services/payments/idempotency';
 import { ProviderName, PaymentWebhookEvent } from '../services/payments/types';
+import { tryPlatformBookingEvent } from './bookingWebhook.controller';
+import { creditProviderPayment, enrollFromWallet, settleOrganizationSubscription } from '../services/wallet.service';
 
 async function handleWebhook(providerName: ProviderName, req: Request, res: Response) {
   let provider;
@@ -18,6 +20,15 @@ async function handleWebhook(providerName: ProviderName, req: Request, res: Resp
     : (req.headers['x-paystack-signature'] as string);
 
   const rawBody = req.body as Buffer; // populated by express.raw() on this route
+
+  // A customer's payment for a booking, collected on an organization's behalf,
+  // arrives on this same endpoint; anything else is plan billing below.
+  if (signatureHeader) {
+    const booking = await tryPlatformBookingEvent(providerName, rawBody, signatureHeader);
+    if (booking === 'handled') return res.status(200).json({ ok: true });
+    if (booking === 'failed') return res.status(500).json({ error: 'Failed to process webhook' });
+  }
+
   const event = provider.verifyWebhookSignature(rawBody, signatureHeader);
 
   if (!event) {
@@ -82,31 +93,47 @@ async function applyWebhookEvent(providerName: ProviderName, event: PaymentWebho
   switch (event.type) {
     case 'checkout_completed':
     case 'renewal_succeeded': {
-      const periodEnd = event.currentPeriodEnd ?? (() => {
-        const d = new Date();
-        d.setMonth(d.getMonth() + 1);
-        return d;
-      })();
+      // Payments land in the wallet first; the wallet then buys the plan.
+      // The credit is keyed on the provider event, so a retried webhook
+      // can't credit (or charge) twice.
+      const credited = event.amount && event.amount > 0 && event.currency
+        ? await creditProviderPayment({
+            organizationId,
+            amount: event.amount,
+            currency: event.currency,
+            provider: providerName,
+            eventId: event.eventId,
+          })
+        : false;
 
-      if (org.subscription) {
-        // On checkout_completed, the org must actually move onto the plan the
-        // customer just paid for — not just have its existing (often Free)
-        // subscription row flipped to ACTIVE. Renewal events don't carry a
-        // planId (the org is already on the right plan by then), so only
-        // apply it when present.
+      if (event.type === 'checkout_completed') {
+        if (!event.planId) break;
+        // A retry after the credit succeeded must not enrol (and charge) again
+        if (event.amount && !credited) break;
+        const result = await enrollFromWallet(organizationId, event.planId, event.billingCycle ?? 'monthly');
+        if (!result.ok) {
+          console.warn(`Wallet could not pay for plan ${event.planId} after checkout for org ${organizationId}: ${result.code}`);
+        }
+      } else if (org.subscription) {
+        // Provider renewals arrive at the period boundary; settle as of the
+        // boundary so the wallet charge renews the plan rather than waiting.
         await prisma.organizationSubscription.update({
           where: { id: org.subscription.id },
-          data: {
-            status: 'ACTIVE',
-            provider: providerName,
-            externalProviderSubscriptionId: event.externalSubscriptionId ?? org.subscription.externalProviderSubscriptionId,
-            currentPeriodEnd: periodEnd,
-            ...(event.planId ? { planId: event.planId } : {}),
-            ...(event.billingCycle ? { billingCycle: event.billingCycle } : {}),
-          },
+          data: { walletManaged: true },
         });
-      } else {
-        console.warn(`Webhook ${event.type} for org ${organizationId} but org has no subscription row yet — skipping (expected to be created by checkout flow before webhook arrives in normal operation)`);
+        const at = org.subscription.currentPeriodEnd > new Date() ? org.subscription.currentPeriodEnd : new Date();
+        await settleOrganizationSubscription(organizationId, at);
+      }
+
+      // Keep the provider's subscription on the row so it can be cancelled
+      if (event.externalSubscriptionId) {
+        const subId = (await prisma.organization.findUnique({ where: { id: organizationId }, select: { subscriptionId: true } }))?.subscriptionId;
+        if (subId) {
+          await prisma.organizationSubscription.update({
+            where: { id: subId },
+            data: { provider: providerName, externalProviderSubscriptionId: event.externalSubscriptionId },
+          });
+        }
       }
       break;
     }

@@ -249,7 +249,7 @@ export default function IntegrationsPage() {
       <PageHeader
         icon={Plug}
         title="Integrations"
-        subtitle="Send queue events to your EMR or other systems as they happen."
+        subtitle="Send queue events to your CRM, point-of-sale, records or other systems as they happen."
         actions={<Button variant="secondary" onClick={() => setEditing('new')}><Webhook size={18} /> Add endpoint</Button>}
       />
 

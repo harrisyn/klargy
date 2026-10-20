@@ -1,3 +1,4 @@
+import { getCurrencyConfig } from '../services/currency.service';
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import { readBookedArrivalSettings } from '../services/queueOrder';
@@ -50,6 +51,7 @@ export const registerOrganization = async (req: Request, res: Response, next: Ne
       adminPassword,   // Admin password
       adminFirstName,  // Admin first name
       adminLastName,   // Admin last name
+      currency,        // Optional: one of the supported currencies
     } = req.body;
 
     // Support both 'email' and 'adminEmail' for backward compatibility
@@ -98,6 +100,14 @@ export const registerOrganization = async (req: Request, res: Response, next: Ne
       resolvedSlug = await generateUniqueSlug(organizationName);
     }
 
+    // The organization's currency: what it chose, if we support it.
+    const currencyConfig = await getCurrencyConfig();
+    const wanted = typeof currency === 'string' ? currency.trim().toUpperCase() : '';
+    if (wanted && !(wanted in currencyConfig.rates)) {
+      return res.status(400).json({ error: `${wanted} isn't a supported currency` });
+    }
+    const chosenCurrency = wanted || currencyConfig.base;
+
     // Create organization and admin user in a transaction
     const result = await prisma.$transaction(async (tx) => {
       // Create organization
@@ -107,6 +117,7 @@ export const registerOrganization = async (req: Request, res: Response, next: Ne
           email: actualAdminEmail, // Use admin email as org email
           phone: phone || null,
           slug: resolvedSlug,
+          currency: chosenCurrency,
         },
       });
 

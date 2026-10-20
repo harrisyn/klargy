@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import { resolveExpiry } from '../lib/subscriptionExpiry';
 import { getStartOfDay } from '../utils/date';
+import { settleBySubscriptionId } from '../services/wallet.service';
 
 // Feature keys that can be checked
 export type FeatureKey = 
@@ -11,6 +12,7 @@ export type FeatureKey =
   | 'maxUsers'
   | 'smsNotifications'
   | 'whatsappNotifications'
+  | 'ownPaymentKeys'
   | 'analytics'
   | 'apiAccess'
   | 'emrIntegration'
@@ -26,6 +28,7 @@ interface SubscriptionFeatures {
   maxUsers?: number;
   smsNotifications?: boolean;
   whatsappNotifications?: boolean;
+  ownPaymentKeys?: boolean;
   analytics?: boolean;
   apiAccess?: boolean;
   emrIntegration?: boolean;
@@ -53,6 +56,7 @@ const DEFAULT_FEATURES: SubscriptionFeatures = {
   maxUsers: 5,
   smsNotifications: false,
   whatsappNotifications: false,
+  ownPaymentKeys: false,
   analytics: false,
   apiAccess: false,
   emrIntegration: false,
@@ -72,7 +76,26 @@ async function applyExpiryIfNeeded<T extends {
   trialEndsAt: Date | null;
   planId: string;
   plan: { id: string; expiredFallbackPlanId: string | null };
+  walletManaged?: boolean;
+  currentPeriodEnd?: Date;
+  planOverrideUntil?: Date | null;
 }>(subscription: T): Promise<T> {
+  // Wallet-billed subscriptions renew themselves (or end a plan bump) the
+  // first time they're read after the period or bump runs out.
+  if (subscription.walletManaged) {
+    const now = new Date();
+    const due =
+      (subscription.currentPeriodEnd && subscription.currentPeriodEnd <= now) ||
+      (subscription.planOverrideUntil && subscription.planOverrideUntil <= now);
+    if (due && (await settleBySubscriptionId(subscription.id, now))) {
+      const fresh = await prisma.organizationSubscription.findUnique({
+        where: { id: subscription.id },
+        include: { plan: true },
+      });
+      if (fresh) subscription = fresh as unknown as T;
+    }
+  }
+
   const resolution = resolveExpiry(
     { status: subscription.status, trialEndsAt: subscription.trialEndsAt, planId: subscription.planId, expiredFallbackPlanId: subscription.plan.expiredFallbackPlanId },
     new Date()

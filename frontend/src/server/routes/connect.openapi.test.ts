@@ -57,6 +57,18 @@ describe.skipIf(!existsSync(SPEC))('Connect OpenAPI description', () => {
   const spec = existsSync(SPEC) ? readFileSync(SPEC, 'utf8') : '';
   const ops = operations(spec);
 
+  it('is valid YAML that tools can read, and every $ref points at something', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const doc = require('js-yaml').load(spec) as Record<string, any>;
+    expect(Object.keys(doc.paths).length).toBeGreaterThan(10);
+    const refs = [...spec.matchAll(/\$ref: '#\/([^']+)'/g)].map((m) => m[1].split('/'));
+    for (const ref of refs) {
+      let node: any = doc;
+      for (const part of ref) node = node?.[part];
+      expect(node, `$ref #/${ref.join('/')}`).toBeDefined();
+    }
+  });
+
   it('describes every Connect route and names its scope', () => {
     const all = routes();
     expect(all.length).toBeGreaterThan(10);

@@ -47,7 +47,7 @@ const DATA_SOURCE_TYPES: { value: string; label: string; icon: LucideIcon }[] = 
   { value: 'WEBHOOK', label: 'Webhook', icon: Link2 },
 ];
 
-// Set up by an EMR connection (Klargy Connect), not from this page.
+// Set up by a system connection (Klargy Connect), not from this page.
 const typeLabel = (type: string) => (type === 'INTEGRATION' ? 'Connected system' : type);
 
 const TRANSFORM_OPTIONS = [

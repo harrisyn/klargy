@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Copy, KeyRound, Link2, Stethoscope } from 'lucide-react';
+import { Copy, KeyRound, Link2, Plug } from 'lucide-react';
 import api, { EmrIntegration, EmrIntegrationDetail, EmrMappableType } from '@/api/client';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
@@ -9,9 +9,9 @@ import { Badge, Button, EmptyState, Input, Modal, Select } from '@/components/ui
 import { apiErrorMessage } from '@/components/auth/AuthShell';
 import { confirmDialog } from '@/lib/dialog';
 
-// EMR connections (Klargy Connect, docs/connect/v1.md): an API key the EMR
+// system connections (Klargy Connect, docs/connect/v1.md): an API key the system
 // uses to register itself and publish its catalogue, and the screen where an
-// admin matches Klargy records to the EMR's.
+// admin matches Klargy records to the system's.
 
 const when = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : null;
@@ -22,7 +22,7 @@ function ApiKeyNotice({ apiKey, onClose }: { apiKey: string; onClose: () => void
     <Modal open onClose={onClose} title="API key" maxWidth="560px" footer={<Button onClick={onClose}>I&apos;ve saved it</Button>}>
       <div className="stack">
         <p style={{ margin: 0 }}>
-          Paste this key into your EMR&apos;s queue management settings. Copy it now; it won&apos;t be shown again.
+          Paste this key into your system&apos;s queue management settings. Copy it now; it won&apos;t be shown again.
         </p>
         <div className="secret-box">
           <span style={{ flex: 1, wordBreak: 'break-all' }}>{apiKey}</span>
@@ -35,7 +35,7 @@ function ApiKeyNotice({ apiKey, onClose }: { apiKey: string; onClose: () => void
           </Button>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: '0.8125rem' }}>
-          Your EMR also needs this workspace&apos;s address: <code>{typeof window !== 'undefined' ? window.location.origin : ''}</code>
+          Your system also needs this workspace&apos;s address: <code>{typeof window !== 'undefined' ? window.location.origin : ''}</code>
         </p>
       </div>
     </Modal>
@@ -72,7 +72,7 @@ function CreateModal({ open, onClose, onCreated }: {
     <Modal
       open
       onClose={onClose}
-      title="Connect an EMR"
+      title="Connect a system"
       maxWidth="520px"
       footer={
         <>
@@ -83,7 +83,7 @@ function CreateModal({ open, onClose, onCreated }: {
     >
       <form id="emr-form" className="stack" onSubmit={submit}>
         {error && <div className="inline-alert inline-alert-error" role="alert">{error}</div>}
-        <Input label="Name" placeholder="Serenity" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} required hint="Which system this key is for" />
+        <Input label="Name" placeholder="e.g. HubSpot, Square, your records system" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} required hint="Which system this key is for" />
       </form>
     </Modal>
   );
@@ -92,19 +92,24 @@ function CreateModal({ open, onClose, onCreated }: {
 type Row = { id: string; name: string; detail?: string; externalId: string | null };
 type Option = { id: string; name: string; kind?: string | null };
 
-// What the EMR says each of its services is (Klargy Connect catalogue `kind`).
+// What the system says each of its services is (Klargy Connect catalogue `kind`).
 const KIND_LABELS: Record<string, string> = {
   clinic: 'Clinic',
   lab: 'Laboratory',
   imaging: 'Imaging',
   pharmacy: 'Pharmacy',
   cashier: 'Cashier',
+  table: 'Table',
+  room: 'Room',
+  desk: 'Desk or counter',
+  staff: 'Staff',
+  service: 'Service',
 };
-const KIND_ORDER = ['clinic', 'lab', 'imaging', 'pharmacy', 'cashier'];
+const KIND_ORDER = ['clinic', 'table', 'room', 'desk', 'service', 'staff', 'lab', 'imaging', 'pharmacy', 'cashier'];
 const kindLabel = (kind: string) => KIND_LABELS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 const kindRank = (kind: string) => (KIND_ORDER.includes(kind) ? KIND_ORDER.indexOf(kind) : KIND_ORDER.length);
 
-/** Options grouped by kind (clinics first), or one plain list when the EMR
+/** Options grouped by kind (the more general kinds first), or one plain list when the system
  * sends no kinds. */
 function groupByKind(options: Option[]): { kind: string | null; options: Option[] }[] {
   if (!options.some((o) => o.kind)) return [{ kind: null, options }];
@@ -141,7 +146,7 @@ function MappingSection({ title, type, rows, options, onChange, busy }: {
       <h3 style={{ margin: 0, fontSize: '0.9375rem' }}>{title}</h3>
       <div className="data-table-wrap">
         <table className="data-table">
-          <thead><tr><th>In Klargy</th><th>In your EMR</th></tr></thead>
+          <thead><tr><th>In Klargy</th><th>In your system</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
@@ -227,13 +232,13 @@ function MappingModal({ integrationId, onClose }: { integrationId: string | null
         !error && <div className="spinner" />
       ) : !ext ? (
         <p className="muted">
-          Your EMR hasn&apos;t published its locations, services and rooms yet. Save its queue management settings to publish them, then come back here.
+          Your system hasn&apos;t published its locations, services and rooms yet. Save its queue management settings to publish them, then come back here.
         </p>
       ) : (
         <div className="stack" style={{ gap: '1.5rem' }}>
           <p className="muted" style={{ margin: 0 }}>
-            Choose the record in your EMR that each Klargy record stands for. Changes save straight away.
-            Staff without a match are matched by email, or added, when they first open the queue desk from the EMR.
+            Choose the record in your system that each Klargy record stands for. Changes save straight away.
+            Staff without a match are matched by email, or added, when they first open the queue desk from the system.
           </p>
           <MappingSection title="Locations" type="location" rows={detail.klargy.locations} options={ext.locations} onChange={change} busy={busy} />
           <MappingSection
@@ -277,7 +282,7 @@ export default function EmrConnectionsPanel() {
     try {
       setList(await api.getEmrIntegrations(user.organizationId));
     } catch (err) {
-      setError(apiErrorMessage(err, 'Could not load EMR connections.'));
+      setError(apiErrorMessage(err, 'Could not load system connections.'));
     } finally {
       setLoading(false);
     }
@@ -292,7 +297,7 @@ export default function EmrConnectionsPanel() {
   };
 
   const rotate = async (i: EmrIntegration) => {
-    if (!(await confirmDialog({ title: `Create a new API key for ${i.name}?`, message: 'The old key stops working immediately, so update your EMR straight after.', confirmLabel: 'Create key' }))) return;
+    if (!(await confirmDialog({ title: `Create a new API key for ${i.name}?`, message: 'The old key stops working immediately, so update your system straight after.', confirmLabel: 'Create key' }))) return;
     await run(i.id, async () => {
       const r = await api.rotateEmrIntegrationKey(i.id);
       setApiKey(r.apiKey);
@@ -310,16 +315,16 @@ export default function EmrConnectionsPanel() {
 
   const status = (i: EmrIntegration) => {
     if (i.status === 'REVOKED') return <Badge tone="error">Disconnected</Badge>;
-    if (!i.registered) return <Badge tone="warning">Waiting for EMR</Badge>;
+    if (!i.registered) return <Badge tone="warning">Waiting for the system</Badge>;
     return <Badge tone="success">Connected</Badge>;
   };
 
   return (
     <div className="panel" style={{ marginBottom: '1.5rem' }}>
       <div className="panel-header">
-        <h2 className="panel-title">EMR connections</h2>
+        <h2 className="panel-title">System connections</h2>
         {allowed && list.length > 0 && (
-          <Button size="sm" variant="secondary" onClick={() => setCreating(true)}><Stethoscope size={14} /> Connect an EMR</Button>
+          <Button size="sm" variant="secondary" onClick={() => setCreating(true)}><Plug size={14} /> Connect a system</Button>
         )}
       </div>
       {error && <div className="panel-body"><div className="inline-alert inline-alert-error" role="alert">{error}</div></div>}
@@ -327,12 +332,12 @@ export default function EmrConnectionsPanel() {
         <div className="panel-body"><div className="spinner" /></div>
       ) : list.length === 0 ? (
         <EmptyState
-          icon={Stethoscope}
-          title={allowed ? 'No EMR connected' : 'EMR connections aren’t on your plan'}
+          icon={Plug}
+          title={allowed ? 'No system connected' : 'System connections aren’t on your plan'}
           description={allowed
-            ? 'Create an API key for your EMR so queue events, rooms and staff stay in step between the two.'
-            : 'Upgrade your plan to connect an EMR such as Serenity.'}
-          action={allowed ? { label: 'Connect an EMR', onClick: () => setCreating(true) } : undefined}
+            ? 'Create an API key for your system so queue events, rooms and staff stay in step between the two.'
+            : 'Upgrade your plan to connect a CRM, point-of-sale, reservations or records system.'}
+          action={allowed ? { label: 'Connect a system', onClick: () => setCreating(true) } : undefined}
         />
       ) : (
         <div className="data-table-wrap">

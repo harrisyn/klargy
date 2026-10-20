@@ -1,6 +1,6 @@
-# Integrating an EMR with Klargy
+# Integrating your system with Klargy
 
-This guide takes an EMR (or any system that sends people into a queue) from nothing to a working Klargy integration. It covers tickets that follow your visits, a desk inside your app, patient lookup and journey automation. The contract is [Klargy Connect v1](./v1.md), with a machine-readable description in [openapi.yaml](./openapi.yaml). This guide explains how to use it.
+This guide takes a CRM, point-of-sale, reservations system, EMR or any other system that sends people into a queue from nothing to a working Klargy integration. It covers tickets that follow your customers' visits, a desk inside your app, customer lookup and journey automation. Where the text says "patient" or "visit", read "customer" or "booking" if that's your world; the API uses the clinical field names for historical reasons and they are stable. The contract is [Klargy Connect v1](./v1.md), with a machine-readable description in [openapi.yaml](./openapi.yaml). This guide explains how to use it.
 
 Examples are in TypeScript with [`@klargy/connect`](../../packages/connect) and in Python with [`klargy-connect`](../../sdks/python/klargy-connect). Both are thin: anything here can also be done with plain HTTP.
 
@@ -20,17 +20,17 @@ Examples are in TypeScript with [`@klargy/connect`](../../packages/connect) and 
 
 ## 1. Concepts
 
-| Klargy | Your EMR | |
+| Klargy | Your system (clinic EMR / restaurant, salon or CRM) | |
 |---|---|---|
-| Organisation (workspace) | Facility or tenant | One Klargy address, for example `https://acme.klargy.com` |
+| Organisation (workspace) | Facility, business or tenant | One Klargy address, for example `https://acme.klargy.com` |
 | Integration | Your connection settings | Holds an API key, your webhook URL, lookup URL and embed origins |
-| Location | Location or branch | Mapped by a Klargy admin |
-| Service (a queue per day) | Clinic or department | Mapped by a Klargy admin. Cashier, lab and pharmacy are services too |
-| Service point (room, with desks) | Consulting room | Optional mapping. Your app doesn't need its own rooms |
-| Staff member | Practitioner | Matched by mapping or email when the desk opens |
-| Journey | **Visit** | Created by your calls. One visit is one journey |
+| Location | Location, branch or venue | Mapped by a Klargy admin |
+| Service (a queue per day) | Clinic or department / dining room, stylist or counter | Mapped by a Klargy admin. Cashier, lab and pharmacy are services too |
+| Service point (room, with desks) | Consulting room / table, chair or till | Optional mapping. Your app doesn't need its own rooms |
+| Staff member | Practitioner / host, stylist or agent | Matched by mapping or email when the desk opens |
+| Journey | **Visit** (or booking, order or case) | Created by your calls. One visit is one journey |
 | Entry (ticket) | Encounter (optional) | One per service the patient queues for during the visit |
-| Patient | Patient | Created by your calls |
+| Patient | Patient / customer, guest or contact | Created by your calls |
 
 What to keep in mind:
 
@@ -418,6 +418,8 @@ await klargy.upsert_appointment(appt.id, {"refs": {"patient": appt.patient_id}, 
 ```
 
 When the patient arrives, send `refs.appointment` with `POST /entries`. A booked appointment is then checked in (`appointment.checked_in`).
+
+For a restaurant, salon or class, seat the booking on Klargy's tables so nothing is given twice. Read the floor plan with `GET /rooms`, see what is free with `GET /rooms/{room}/availability?start=…&partySize=4`, then send `tables: "auto"` (or a list of table ids) with the appointment. A table taken in the meantime answers 409 `TABLE_UNAVAILABLE` and changes nothing; a business without tables answers 422 `TABLES_NOT_AVAILABLE`. Details: [v1, tables and seats](./v1.md#tables-and-seats).
 
 ## 9. Analytics
 

@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/ui';
 import { useAuthContext } from '@/contexts/AuthContext';
 import type { Location, Service, ServiceFlow } from '@/types';
 import { confirmDialog } from '@/lib/dialog';
+import FlowTemplatePicker from '@/components/flow/FlowTemplatePicker';
 
 interface FlowNode {
   id: string;
@@ -153,8 +154,10 @@ const FlowDesignerPage: React.FC = () => {
       const added = r.services.filter((s) => s.created).length;
       setTemplateResult(
         added || r.flowsCreated
-          ? `Added ${added} service${added === 1 ? '' : 's'}, ${r.servicePointsCreated} service point${r.servicePointsCreated === 1 ? '' : 's'} and ${r.flowsCreated} connection${r.flowsCreated === 1 ? '' : 's'}.`
-          : 'Everything in this template was already set up here.'
+          ? `Added ${added} service${added === 1 ? '' : 's'}, ${r.servicePointsCreated} service point${r.servicePointsCreated === 1 ? '' : 's'} and ${r.flowsCreated} connection${r.flowsCreated === 1 ? '' : 's'}${r.roomsCreated ? `, plus ${r.roomsCreated} room${r.roomsCreated === 1 ? '' : 's'} with ${r.tablesCreated} table${r.tablesCreated === 1 ? '' : 's'} or seats you can arrange under Rooms` : ''}.`
+          : r.roomsCreated
+            ? `Added ${r.roomsCreated} room${r.roomsCreated === 1 ? '' : 's'} with ${r.tablesCreated} table${r.tablesCreated === 1 ? '' : 's'} or seats. Arrange them under Rooms.`
+            : 'Everything in this template was already set up here.'
       );
       await loadFlows(selectedLocation);
     } catch (err: unknown) {
@@ -649,43 +652,15 @@ const FlowDesignerPage: React.FC = () => {
         {showTemplate && (
           <div className="modal-overlay" onClick={() => !applying && setShowTemplate(false)}>
             <div className="modal template-modal" role="dialog" aria-labelledby="template-title" onClick={e => e.stopPropagation()}>
-              <h2 id="template-title">Use a template</h2>
-              <p className="modal-desc">
-                Sets up a ready-made flow at {locations.find(l => l.id === selectedLocation)?.name || 'this location'}. Services that already exist
-                here with the same name are reused; nothing is removed.
-              </p>
-              {templates.length === 0 && <p className="modal-desc">Loading…</p>}
-              {templates.map(t => (
-                <div key={t.id} className="template-card">
-                  <h3>{t.name}</h3>
-                  <p>{t.description}</p>
-                  <ul className="template-flows">
-                    {Object.entries(t.flows).map(([from, tos]) => (
-                      <li key={from}>
-                        <strong>{from}</strong>
-                        {t.services.find(s => s.name === from)?.requiresClearance && <span className="template-tag">waits for payment</span>}
-                        {from === t.defaultService && <span className="template-tag">first point of contact</span>}
-                        <span className="template-to">{tos.length ? `→ ${tos.join(', ')}` : '→ exit'}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  {templateResult ? (
-                    <p className="template-result" role="status">{templateResult}</p>
-                  ) : (
-                    <div className="modal-actions">
-                      <button className="cancel-btn" onClick={() => setShowTemplate(false)} disabled={applying}>Cancel</button>
-                      <button className="submit-btn" onClick={() => applyTemplate(t.id)} disabled={applying || !selectedLocation}>
-                        {applying ? 'Applying…' : 'Apply to this location'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {templateResult && (
-                <div className="modal-actions">
-                  <button className="submit-btn" onClick={() => setShowTemplate(false)}>Done</button>
-                </div>
-              )}
+              <FlowTemplatePicker
+                templates={templates}
+                industry={user?.organization?.industry}
+                locationName={locations.find(l => l.id === selectedLocation)?.name || 'this location'}
+                applying={applying}
+                result={templateResult}
+                onApply={applyTemplate}
+                onClose={() => setShowTemplate(false)}
+              />
             </div>
           </div>
         )}
@@ -1083,59 +1058,10 @@ const FlowDesignerPage: React.FC = () => {
           }
 
           .template-modal {
-            max-width: 560px;
+            max-width: 860px;
+            width: 94%;
             max-height: 90vh;
             overflow-y: auto;
-          }
-
-          .template-card h3 {
-            margin: 0 0 0.25rem;
-            font-size: 1.05rem;
-          }
-
-          .template-card > p {
-            margin: 0 0 0.75rem;
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-          }
-
-          .template-flows {
-            list-style: none;
-            margin: 0 0 1rem;
-            padding: 0;
-            display: grid;
-            gap: 0.375rem;
-            font-size: 0.875rem;
-          }
-
-          .template-flows li {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: baseline;
-            gap: 0.375rem;
-            padding: 0.5rem 0.75rem;
-            background: var(--gray-50);
-            border-radius: 8px;
-          }
-
-          .template-to {
-            color: var(--text-secondary);
-          }
-
-          .template-tag {
-            font-size: 0.75rem;
-            padding: 0.0625rem 0.5rem;
-            border-radius: 999px;
-            background: var(--primary-50);
-            color: var(--primary-700);
-          }
-
-          .template-result {
-            padding: 0.75rem;
-            border-radius: 10px;
-            background: var(--primary-50);
-            color: var(--primary-700);
-            font-size: 0.9rem;
           }
 
           .modal h2 {

@@ -1,43 +1,25 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
-import { emitToQueue, SOCKET_EVENTS } from '../lib/realtime';
-import { getStartOfDay, getEndOfDay, isDayActive, startOfLocalDate, validTimeZone } from '../utils/date';
+import { getEndOfDay, startOfLocalDate, validTimeZone } from '../utils/date';
 import { serviceTimeZone } from '../services/queueEvents.service';
-import { bookedArrivalSettings, bookedFields } from '../services/bookedArrival.service';
-import { generateTicketNumber, getNextSequence } from '../utils/ticket';
 import { listScopeOrgId, loadCaller } from '../middleware/tenantScope.middleware';
 import {
-  recordQueueEvent,
-  startJourney,
-  afterQueueChange,
-  getOrCreateQueueForDate,
-} from '../services/queueEvents.service';
-
-// Appointment.status is a plain string column.
-const ACTIVE_STATUSES = ['SCHEDULED', 'CONFIRMED'];
+  ACTIVE_STATUSES,
+  BookingError,
+  appointmentInclude,
+  availableSlots,
+  cancelAppointmentCore,
+  checkInAppointmentCore,
+  claimSlot,
+  releaseSlot,
+  rescheduleAppointmentCore,
+  unitsOf,
+} from '../services/booking.service';
+import { refundBooking } from '../services/bookingPayments/bookingPayments.service';
+import { PriceChangeError, bookingEnd, reassignTables, tableData, withTable } from '../services/tables.service';
+import { recordQueueEvent } from '../services/queueEvents.service';
 
 const actorId = (req: Request) => req.user?.userId ?? null;
-
-const appointmentInclude = {
-  user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-  service: { include: { location: true } },
-  slot: true,
-} as const;
-
-/** Claims one place in a slot without overbooking under concurrent requests. */
-async function claimSlot(slotId: string): Promise<boolean> {
-  const slot = await prisma.slot.findUnique({ where: { id: slotId }, select: { capacity: true } });
-  if (!slot) return false;
-  const { count } = await prisma.slot.updateMany({
-    where: { id: slotId, bookedCount: { lt: slot.capacity } },
-    data: { bookedCount: { increment: 1 } },
-  });
-  return count > 0;
-}
-
-async function releaseSlot(slotId: string) {
-  await prisma.slot.updateMany({ where: { id: slotId, bookedCount: { gt: 0 } }, data: { bookedCount: { decrement: 1 } } });
-}
 
 /**
  * Books an appointment. Reception either picks an existing patient
@@ -61,6 +43,10 @@ export const createAppointment = async (req: Request, res: Response, next: NextF
       return res.status(400).json({ error: 'That time has already passed' });
     }
     const organizationId = slot.queue.service.location.organizationId;
+    // Seat-based services take a party size; the front desk can book any size up to the slot's room.
+    const svc = slot.queue.service;
+    const partySize = svc.bookingUnit === 'PERSON' ? Math.max(1, Math.floor(Number(req.body.partySize ?? 1)) || 1) : 1;
+    const units = unitsOf({ partySize }, svc);
 
     let patientId: string | undefined = userId;
     if (!patientId) {
@@ -91,34 +77,88 @@ export const createAppointment = async (req: Request, res: Response, next: NextF
       return res.status(400).json({ error: 'They already have an appointment in that slot' });
     }
 
-    if (!(await claimSlot(slotId))) {
-      return res.status(400).json({ error: 'That slot is fully booked' });
+    if (!(await claimSlot(slotId, units))) {
+      return res.status(400).json({ error: units > 1 ? 'There isn’t room for that many in that slot' : 'That slot is fully booked' });
     }
 
-    const appointment = await prisma.appointment.create({
-      data: {
-        userId: patientId,
-        serviceId,
-        slotId,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-        createdBy: caller.id,
-        notes: notes || null,
-      },
-      include: appointmentInclude,
-    });
+    // With tables the booking is given one (or the ones the host picked) and created in one step.
+    let appointment;
+    try {
+      appointment = await withTable(
+        {
+          tableMode: svc.tableMode,
+          locationId: svc.locationId,
+          start: slot.startTime,
+          end: bookingEnd(slot.startTime, slot.endTime, svc.slotDuration),
+          partySize,
+          online: false,
+          timeZone: svc.location.timezone,
+          roomId: typeof req.body.roomId === 'string' ? req.body.roomId : null,
+          tableIds: Array.isArray(req.body.tableIds) ? req.body.tableIds.filter((v: unknown): v is string => typeof v === 'string') : null,
+        },
+        (db, tables) =>
+          db.appointment.create({
+            data: {
+              userId: patientId!,
+              serviceId,
+              slotId,
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+              createdBy: caller.id,
+              partySize,
+              notes: notes || null,
+              ...tableData(tables, svc.roomId),
+            },
+            include: appointmentInclude,
+          })
+      );
+    } catch (error) {
+      await releaseSlot(slotId, units);
+      throw error;
+    }
 
     await recordQueueEvent({
       action: 'appointment.created',
       actorUserId: caller.id,
       queueId: slot.queueId,
       organizationId,
-      data: { appointmentId: appointment.id, slotStart: slot.startTime, patientId },
+      data: { appointmentId: appointment.id, slotStart: slot.startTime, patientId, partySize },
     });
 
     res.status(201).json(appointment);
   } catch (error) {
     next(error);
+  }
+};
+
+/**
+ * Staff move a booking to other tables or seats (or take them off). A move into
+ * a room with a different rate changes the price: without `confirmPrice` the
+ * answer is a 409 saying what it would become; with it, an overpayment is
+ * refunded and a balance is shown on the booking.
+ */
+export const setAppointmentTables = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const tableIds: string[] = Array.isArray(req.body?.tableIds) ? req.body.tableIds.filter((v: unknown): v is string => typeof v === 'string') : [];
+    const moved = await reassignTables(req.params.id, tableIds, { confirmPrice: req.body?.confirmPrice === true });
+    const change = moved.priceChange;
+    if (change && (change.diff < 0 || change.refund > 0)) {
+      // The new price is recorded first, so a refund that fails leaves the booking visibly overpaid and a second move settles it.
+      await prisma.appointment.update({ where: { id: req.params.id }, data: { amount: change.to } });
+      if (change.refund > 0) {
+        try {
+          await refundBooking(req.params.id, { policy: 'AMOUNT', amount: change.refund });
+        } catch (error) {
+          const why = error instanceof BookingError ? ` ${error.message}` : '';
+          throw new BookingError(`They’ve been moved, but the ${change.refund.toFixed(2)} refund didn’t go through.${why} Move them again to retry it.`, 502);
+        }
+      }
+    }
+    const appointment = await prisma.appointment.findUnique({ where: { id: req.params.id }, include: appointmentInclude });
+    res.json({ ...appointment, priceChange: change });
+  } catch (error) {
+    if (error instanceof PriceChangeError) return res.status(409).json({ error: error.message, priceChange: error.change });
+    sendBookingError(error, res, next);
   }
 };
 
@@ -194,157 +234,33 @@ export const getUserAppointments = async (req: Request, res: Response, next: Nex
   }
 };
 
+const sendBookingError = (error: unknown, res: Response, next: NextFunction) =>
+  error instanceof BookingError ? res.status(error.status).json({ error: error.message }) : next(error);
+
 export const rescheduleAppointment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const { newSlotId } = req.body;
-
-    const appointment = await prisma.appointment.findUnique({ where: { id }, include: { slot: true } });
-    if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
-    if (!ACTIVE_STATUSES.includes(appointment.status)) {
-      return res.status(400).json({ error: `A ${appointment.status.toLowerCase()} appointment can't be rescheduled` });
-    }
-    if (newSlotId === appointment.slotId) return res.status(400).json({ error: 'That is the current slot' });
-
-    const newSlot = await prisma.slot.findUnique({ where: { id: newSlotId }, include: { queue: true } });
-    if (!newSlot || newSlot.queue.serviceId !== appointment.serviceId) {
-      return res.status(404).json({ error: 'New slot not found for this service' });
-    }
-    if (newSlot.startTime < new Date()) return res.status(400).json({ error: 'That time has already passed' });
-    if (!(await claimSlot(newSlotId))) return res.status(400).json({ error: 'New slot is fully booked' });
-
-    const updated = await prisma.appointment.update({
-      where: { id },
-      data: { slotId: newSlotId, startTime: newSlot.startTime, endTime: newSlot.endTime, rescheduledAt: new Date() },
-      include: appointmentInclude,
-    });
-    if (appointment.slot) {
-      await releaseSlot(appointment.slot.id);
-      emitToQueue(appointment.slot.queueId, SOCKET_EVENTS.SLOT_RELEASED, { slotId: appointment.slot.id });
-    }
-    await recordQueueEvent({
-      action: 'appointment.rescheduled',
-      actorUserId: actorId(req),
-      queueId: newSlot.queueId,
-      data: { appointmentId: id, fromSlotStart: appointment.startTime, toSlotStart: newSlot.startTime },
-    });
-
-    res.json(updated);
+    res.json(await rescheduleAppointmentCore(req.params.id, req.body.newSlotId, actorId(req)));
   } catch (error) {
-    next(error);
+    sendBookingError(error, res, next);
   }
 };
 
 export const cancelAppointment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-
-    const appointment = await prisma.appointment.findUnique({ where: { id }, include: { slot: true } });
-    if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
-
-    // Only an active appointment holds a slot place; cancelling twice must
-    // not free the place twice.
-    const { count } = await prisma.appointment.updateMany({
-      where: { id, status: { in: ACTIVE_STATUSES } },
-      data: { status: 'CANCELLED' },
-    });
-    if (count === 0) {
-      return res.status(400).json({ error: `This appointment is already ${appointment.status.toLowerCase()}` });
-    }
-    if (appointment.slot) {
-      await releaseSlot(appointment.slot.id);
-      emitToQueue(appointment.slot.queueId, SOCKET_EVENTS.SLOT_RELEASED, { slotId: appointment.slot.id });
-    }
-    const organizationId = (await prisma.service.findUnique({
-      where: { id: appointment.serviceId },
-      select: { location: { select: { organizationId: true } } },
-    }))?.location.organizationId;
-    await recordQueueEvent({
-      action: 'appointment.cancelled',
-      actorUserId: actorId(req),
-      queueId: appointment.slot?.queueId ?? null,
-      organizationId,
-      data: { appointmentId: id, slotStart: appointment.startTime, patientId: appointment.userId },
-    });
-
-    res.json(await prisma.appointment.findUnique({ where: { id }, include: appointmentInclude }));
+    // A paid online booking cancelled by staff is refunded in full; if the refund fails it stays booked.
+    await refundBooking(req.params.id, { policy: 'FULL' });
+    res.json(await cancelAppointmentCore(req.params.id, actorId(req)));
   } catch (error) {
-    next(error);
+    sendBookingError(error, res, next);
   }
 };
 
 // Check-in: turns a same-day appointment into a (priority) queue entry.
 export const checkInAppointment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
-      include: { slot: { include: { queue: { include: { service: true } } } }, service: true },
-    });
-    if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
-    if (!ACTIVE_STATUSES.includes(appointment.status)) {
-      return res.status(400).json({ error: 'This appointment can no longer be checked in' });
-    }
-
-    // An appointment booked in a connected EMR has no slot: it checks in to
-    // its service's queue for the day of the appointment.
-    const queue = appointment.slot?.queue ?? (await getOrCreateQueueForDate(appointment.serviceId, appointment.startTime))?.queue;
-    if (!queue) return res.status(404).json({ error: 'Appointment not found' });
-    const service = appointment.slot?.queue.service ?? appointment.service;
-    const tz = await serviceTimeZone(queue.serviceId);
-    if (getStartOfDay(queue.date, tz).getTime() !== getStartOfDay(new Date(), tz).getTime()) {
-      return res.status(400).json({ error: 'Check-in opens on the day of the appointment' });
-    }
-    if (queue.status !== 'ACTIVE') {
-      return res.status(400).json({ error: 'This queue isn’t taking anyone right now' });
-    }
-
-    const { count } = await prisma.appointment.updateMany({
-      where: { id, status: { in: ACTIVE_STATUSES } },
-      data: { status: 'CHECKED_IN' },
-    });
-    if (count === 0) return res.status(400).json({ error: 'This appointment was already checked in' });
-
-    const sequence = await getNextSequence(prisma, queue.id);
-    const ticketNumber = generateTicketNumber(service.name.charAt(0).toUpperCase(), sequence);
-    const lastEntry = await prisma.queueEntry.findFirst({ where: { queueId: queue.id }, orderBy: { sortOrder: 'desc' } });
-    const organizationId = (await prisma.service.findUnique({
-      where: { id: queue.serviceId },
-      select: { location: { select: { organizationId: true } } },
-    }))?.location.organizationId;
-    const settings = organizationId ? await bookedArrivalSettings(organizationId) : null;
-
-    const entry = await prisma.queueEntry.create({
-      data: {
-        queueId: queue.id,
-        userId: appointment.userId,
-        ticketNumber,
-        // Booked patients arriving on time are placed by their booked time
-        // among walk-ins (queueOrder.ts); late ones join as walk-ins. With
-        // that setting off, booked patients go ahead of walk-ins as before.
-        priority: settings?.enabled ? 0 : 1,
-        sortOrder: (lastEntry?.sortOrder || 0) + 1,
-        notes: 'Appointment check-in',
-        ...(settings ? bookedFields(appointment, settings) : {}),
-      },
-      include: { user: { select: { id: true, firstName: true, lastName: true } } },
-    });
-
-    emitToQueue(queue.id, SOCKET_EVENTS.QUEUE_UPDATED, { queueId: queue.id, action: 'appointment_checkin', entry });
-    await startJourney(entry.id);
-    await recordQueueEvent({
-      action: 'appointment.checked_in',
-      actorUserId: actorId(req),
-      queueId: queue.id,
-      entryId: entry.id,
-      data: { appointmentId: id },
-    });
-    await afterQueueChange(queue.id);
-
-    res.json({ entry, ticketNumber, serviceName: service.name, queueId: queue.id });
+    res.json(await checkInAppointmentCore(req.params.id, actorId(req)));
   } catch (error) {
-    next(error);
+    sendBookingError(error, res, next);
   }
 };
 
@@ -352,44 +268,16 @@ export const checkInAppointment = async (req: Request, res: Response, next: Next
 // demand, so future dates are bookable before anyone has joined.
 export const getAvailableSlots = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { serviceId } = req.params;
-    const { date } = req.query;
-
-    const tz = await serviceTimeZone(serviceId);
-    if (date && !/^\d{4}-\d{2}-\d{2}/.test(String(date))) return res.status(400).json({ error: 'Invalid date' });
-    const startOfDay = date ? startOfLocalDate(String(date), tz) : getStartOfDay(new Date(), tz);
-    if (Number.isNaN(startOfDay.getTime())) return res.status(400).json({ error: 'Invalid date' });
-    if (startOfDay < getStartOfDay(new Date(), tz)) {
-      return res.json({ slots: [], message: 'That date has already passed' });
-    }
-
-    const service = await prisma.service.findUnique({ where: { id: serviceId } });
-    if (!service || !service.isActive) return res.json({ slots: [], message: 'This service is not active' });
-    if (!isDayActive(startOfDay, service.activeDays, tz)) {
-      return res.json({ slots: [], message: `${service.name} isn't open on this day` });
-    }
-
-    const created = await getOrCreateQueueForDate(serviceId, startOfDay);
-    if (!created) return res.json({ slots: [], message: 'No queue available for this date' });
-
-    const slots = await prisma.slot.findMany({
-      where: { queueId: created.queue.id, startTime: { gte: new Date() } },
-      orderBy: { startTime: 'asc' },
-    });
-
-    res.json({
-      queueId: created.queue.id,
-      date: startOfDay,
-      slots: slots.map((slot) => ({
-        id: slot.id,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-        available: Math.max(0, slot.capacity - slot.bookedCount),
-        capacity: slot.capacity,
-      })),
-    });
+    const party = Math.floor(Number(req.query.partySize ?? 1));
+    res.json(
+      await availableSlots(req.params.serviceId, req.query.date ? String(req.query.date) : undefined, {
+        partySize: Number.isFinite(party) && party > 0 ? party : 1,
+        roomId: typeof req.query.roomId === 'string' ? req.query.roomId : null,
+        online: false,
+      })
+    );
   } catch (error) {
-    next(error);
+    sendBookingError(error, res, next);
   }
 };
 

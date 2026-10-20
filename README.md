@@ -5,7 +5,7 @@
 Klargy is multi-tenant queue and appointment management for clinics and other service
 providers: walk-ins via QR/kiosk, booked appointments, multi-step patient
 journeys (reception → doctor → lab → pharmacy), live display boards, patient
-notifications, EMR webhooks, billing, and AI-assisted analytics.
+notifications, webhooks to your CRM, point-of-sale or records system, billing, and AI-assisted analytics.
 
 One Next.js project (`frontend/`) contains both the web app and the API, and
 deploys as a single unit (Vercel or one Docker image).
@@ -61,7 +61,7 @@ docs/                 Deployment guide, Klargy Connect docs, work tracker, desig
   locally). Events carry IDs and statuses only; pages refetch what they show.
 - **Queue events.** Joins, calls, completions, transfers and appointment
   changes all go through `src/server/services/queueEvents.service.ts`, which
-  writes the audit log, fires EMR webhooks, maintains patient journeys, and
+  writes the audit log, fires webhooks to connected systems, maintains patient journeys, and
   sends notifications.
 - **Background work.** `/api/v1/cron/frequent` (webhook retries, cleanup) and
   `/api/v1/cron/daily` (appointment reminders, AI digests), run by Vercel Cron.
@@ -74,26 +74,28 @@ npm run typecheck    # tsc --noEmit
 npm test             # unit tests (vitest)
 npm run build        # production build
 npm run db:migrate   # apply migrations
-npm run sandbox:create -- --name "Acme EMR sandbox"   # Klargy Connect sandbox workspace
+npm run sandbox:create -- --name "Acme sandbox"   # Klargy Connect sandbox workspace
 ```
 
-## Integrating an EMR
+## Integrating a CRM, point-of-sale, reservations or records system
 
 Other systems integrate through **Klargy Connect**, an API addressed by the
-EMR's own ids. It covers tickets that follow the EMR's visits, signed
-webhooks, the staff desk framed in the EMR, patient lookup and journey
-automation.
+other system's own ids. It covers tickets that follow its customers' visits,
+signed webhooks, the staff desk framed in its app, customer lookup and
+journey automation. It works the same for a CRM, a restaurant or salon
+booking system, a point-of-sale or a hospital EMR.
 
-- [docs/connect/guide.md](docs/connect/guide.md): step-by-step integration guide for a new EMR, including the sandbox
-- [docs/guides/outpatient-journey.md](docs/guides/outpatient-journey.md): running an outpatient journey (reception, cashier, triage, consultation, lab, imaging, pharmacy) in Klargy and from the EMR
+- [docs/connect/guide.md](docs/connect/guide.md): step-by-step integration guide for a new system, including the sandbox
+- [docs/guides/outpatient-journey.md](docs/guides/outpatient-journey.md): running an outpatient journey (reception, cashier, triage, consultation, lab, imaging, pharmacy) in Klargy and from the records system
 - [docs/connect/v1.md](docs/connect/v1.md): the contract; [docs/connect/openapi.yaml](docs/connect/openapi.yaml): the same as OpenAPI 3.1
 - SDKs: [`@klargy/connect`](packages/connect) (TypeScript: client, webhook and lookup verification, desk embed) and [`klargy-connect`](sdks/python/klargy-connect) (Python)
 
 ## Docs
 
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): Vercel and Docker deployment, environment variables
-- [docs/connect/guide.md](docs/connect/guide.md): integrating an EMR (Klargy Connect)
+- [docs/connect/guide.md](docs/connect/guide.md): integrating a CRM, POS, reservations or records system (Klargy Connect)
 - [docs/guides/outpatient-journey.md](docs/guides/outpatient-journey.md): running an outpatient journey
+- [docs/guides/online-booking.md](docs/guides/online-booking.md): booking a time online, per-service join modes, industry templates
 - [docs/superpowers/tracker.md](docs/superpowers/tracker.md): live checklist of done / open work
 - [TECHNICAL_PRD.md](TECHNICAL_PRD.md): product requirements
 - [docs/superpowers/specs/](docs/superpowers/specs/): design specs per feature

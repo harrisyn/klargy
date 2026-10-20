@@ -12,14 +12,14 @@ import type { ServicePoint, ServicePointType } from '@/types';
 import { confirmDialog } from '@/lib/dialog';
 
 const SERVICE_POINT_TYPES: { value: ServicePointType; label: string; icon: LucideIcon }[] = [
-  { value: 'RECEPTION', label: 'Reception', icon: Building2 },
-  { value: 'TRIAGE', label: 'Triage', icon: Syringe },
-  { value: 'CONSULTATION', label: 'Consultation', icon: Stethoscope },
-  { value: 'CASHIER', label: 'Cashier', icon: Wallet },
+  { value: 'RECEPTION', label: 'Reception or front desk', icon: Building2 },
+  { value: 'TRIAGE', label: 'Triage or assessment', icon: Syringe },
+  { value: 'CONSULTATION', label: 'Consultation or service room', icon: Stethoscope },
+  { value: 'CASHIER', label: 'Cashier, till or checkout', icon: Wallet },
   { value: 'PHARMACY', label: 'Pharmacy', icon: Pill },
   { value: 'LAB', label: 'Laboratory', icon: FlaskConical },
   { value: 'IMAGING', label: 'Imaging', icon: Camera },
-  { value: 'OTHER', label: 'Other', icon: MapPin },
+  { value: 'OTHER', label: 'Table, chair, counter or other', icon: MapPin },
 ];
 
 const ServicePointsPage: React.FC = () => {

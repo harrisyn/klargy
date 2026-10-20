@@ -431,7 +431,8 @@ export async function getOrCreateQueueForDate(serviceId: string, date: Date = ne
   const existing = await prisma.queue.findFirst({ where: { serviceId, date: day } });
   if (existing) return { queue: existing, service, tz };
 
-  const slots = generateTimeSlots(service.startTime, service.endTime, service.slotDuration, day, tz);
+  // Sessions-only services (events, tickets) have no slots from opening hours.
+  const slots = service.recurringSlots === false ? [] : generateTimeSlots(service.startTime, service.endTime, service.slotDuration, day, tz);
   try {
     const queue = await prisma.queue.create({
       data: {

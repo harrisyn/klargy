@@ -17,6 +17,9 @@ import {
   getDashboardStats,
   getOrganizationUsage,
 } from '../controllers/superadmin.controller';
+import { getCurrencySettings, updateCurrencySettings, refreshCurrencyRates, setOrganizationCurrency } from '../controllers/currency.controller';
+import { getPayoutSettingsHandler, updatePayoutSettingsHandler, listPayoutRequests, decidePayoutRequest, getOrganizationPayouts } from '../controllers/payouts.controller';
+import { getOrganizationWallet, adjustOrganizationWallet, bumpOrganizationPlan, endOrganizationPlanBump } from '../controllers/wallet.controller';
 import { listPaymentProviders, upsertPaymentProvider, testPaymentProvider } from '../controllers/paymentProvider.controller';
 import { listAddOnPricing, updateAddOnPricing } from '../controllers/addOnPricing.controller';
 import { listFileStorageProviders, upsertFileStorageProvider, testFileStorageProvider } from '../controllers/fileStorageProvider.controller';
@@ -41,6 +44,23 @@ router.post('/organizations/:id/impersonate', impersonateOrganization);
 router.patch('/organizations/:id/subscription', updateOrganizationSubscription);
 router.post('/organizations/:id/cancel', cancelOrganizationSubscription);
 router.post('/organizations/:id/credits/grant', grantCredits);
+router.get('/organizations/:id/wallet', getOrganizationWallet);
+router.get('/organizations/:id/payouts', getOrganizationPayouts);
+
+// Supported currencies and conversion rates
+router.get('/currencies', getCurrencySettings);
+router.put('/currencies', updateCurrencySettings);
+router.post('/currencies/refresh', refreshCurrencyRates);
+router.patch('/organizations/:id/currency', setOrganizationCurrency);
+
+// Money collected on organizations' behalf: settings and payout requests
+router.get('/payout-settings', getPayoutSettingsHandler);
+router.put('/payout-settings', updatePayoutSettingsHandler);
+router.get('/payouts', listPayoutRequests);
+router.post('/payouts/:id/decision', decidePayoutRequest);
+router.post('/organizations/:id/wallet/adjust', adjustOrganizationWallet);
+router.post('/organizations/:id/subscription/bump', bumpOrganizationPlan);
+router.post('/organizations/:id/subscription/bump/end', endOrganizationPlanBump);
 router.delete('/organizations/:id', deleteOrganization);
 
 // Subscription plan management

@@ -53,6 +53,11 @@ export interface PaymentWebhookEvent {
   planId: string | null;
   billingCycle: 'monthly' | 'quarterly' | 'yearly' | null;
   kind: 'plan' | 'addon';
+  // What the customer actually paid (major units) - credited to their wallet.
+  // Null/absent when nothing should be credited (e.g. Stripe's first invoice,
+  // which is already covered by the checkout event).
+  amount?: number | null;
+  currency?: string | null;
   addOn?: { resourceType: AddOnResourceType; quantity: number; billingMode: AddOnBillingMode };
 }
 

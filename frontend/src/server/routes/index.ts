@@ -20,6 +20,8 @@ import connectLookupRoutes from './connectLookup.routes';
 import cronRoutes from './cron.routes';
 import aiRoutes from './ai.routes';
 import onboardingRoutes from './onboarding.routes';
+import paymentsRoutes from './payments.routes';
+import roomsRoutes from './rooms.routes';
 import displayRoutes from './display.routes';
 import { getPublicDisplayContent } from '../controllers/display.controller';
 import { limits } from '../middleware/rateLimit.middleware';
@@ -42,14 +44,26 @@ import {
   getPublicOrganizationBySlug,
   getPublicOrganization,
 } from '../controllers/organization.controller';
+import {
+  getBookableSlots,
+  quoteOnlineBooking,
+  getSeatMap,
+  createOnlineBooking,
+  getOnlineBooking,
+  cancelOnlineBooking,
+  rescheduleOnlineBooking,
+  checkInOnlineBooking,
+} from '../controllers/publicBooking.controller';
+import { getPublicCurrencies } from '../controllers/currency.controller';
 import { getSetupStatus, completeSetup } from '../controllers/setup.controller';
 import { getOrganizationByDomain } from '../controllers/customDomain.controller';
 import { getPublicLocationServices } from '../controllers/service.controller';
 import { sendOTP, verifyOTPCode } from '../controllers/auth.controller';
 import { createCheckoutSession, switchToFreePlan } from '../controllers/subscriptionCheckout.controller';
+import { getMyWallet, walletCheckout } from '../controllers/wallet.controller';
 import { createAddOnCheckout, listMyAddOns, cancelAddOn } from '../controllers/addOnCheckout.controller';
 import { listAddOnPricing } from '../controllers/addOnPricing.controller';
-import { listPlans } from '../controllers/superadmin.controller';
+import { listPlansForCaller } from '../controllers/superadmin.controller';
 
 const router = Router();
 
@@ -76,6 +90,19 @@ router.get('/public/orgs/:orgId', getPublicOrganization);
 router.get('/public/orgs/:orgId/locations/:locationId/services', getPublicLocationServices);
 router.get('/public/invites/:code', previewInvite);
 
+// Online booking: customers book, change, cancel and check in with a private link.
+router.get('/public/booking/services/:serviceId/slots', limits.publicBookRead, getBookableSlots);
+router.get('/public/booking/services/:serviceId/quote', limits.publicBookRead, quoteOnlineBooking);
+router.get('/public/booking/services/:serviceId/seats', limits.publicBookRead, getSeatMap);
+router.post('/public/booking', limits.publicBook, createOnlineBooking);
+router.get('/public/booking/:token', limits.publicBookRead, getOnlineBooking);
+router.post('/public/booking/:token/cancel', limits.publicBook, cancelOnlineBooking);
+router.post('/public/booking/:token/reschedule', limits.publicBook, rescheduleOnlineBooking);
+router.post('/public/booking/:token/check-in', limits.publicBook, checkInOnlineBooking);
+
+// Currencies an organization can choose when signing up.
+router.get('/public/currencies', getPublicCurrencies);
+
 // First-run setup: creates the first superadmin. Closed once one exists.
 router.get('/public/setup/status', getSetupStatus);
 router.post('/public/setup', limits.setup, completeSetup);
@@ -88,6 +115,8 @@ router.post('/public/verify-otp', limits.verifyCode, verifyOTPCode);
 router.get('/subscription', authenticate, getMySubscription);
 router.post('/tenant/subscription/checkout', authenticate, createCheckoutSession);
 router.post('/tenant/subscription/switch/:planId', authenticate, switchToFreePlan);
+router.get('/tenant/wallet', authenticate, getMyWallet);
+router.post('/tenant/wallet/checkout', authenticate, walletCheckout);
 router.post('/tenant/addons/checkout', authenticate, createAddOnCheckout);
 router.get('/tenant/addons', authenticate, listMyAddOns);
 router.delete('/tenant/addons/:id', authenticate, cancelAddOn);
@@ -96,7 +125,7 @@ router.delete('/tenant/addons/:id', authenticate, cancelAddOn);
 router.get('/tenant/addon-pricing', authenticate, listAddOnPricing);
 // Read-only plan listing for any authenticated user (not superadmin-only -
 // tenants need this to render the pricing page).
-router.get('/plans', authenticate, listPlans);
+router.get('/plans', authenticate, listPlansForCaller);
 
 router.use('/cron', cronRoutes);
 router.use('/connect/v1', connectRoutes);
@@ -115,6 +144,8 @@ router.use('/users', userRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/ai', aiRoutes);
 router.use('/onboarding', onboardingRoutes);
+router.use('/payments', paymentsRoutes);
+router.use('/rooms', roomsRoutes);
 router.use('/display', displayRoutes);
 router.use('/superadmin', superadminRoutes);
 // Mounted at '/' - these carry their own per-route auth.

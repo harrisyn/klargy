@@ -189,3 +189,74 @@ Branch: `arch-review-fixes`. Origin: architecture review of 2026-09-25.
 - [ ] Shared number messages aren't metered; decide whether they use credits
 - [ ] Price AI/SMS/storage as add-ons (add-on tiles still cover locations, seats and display media only)
 
+
+## Wallet billing (2026-10-19)
+
+- [x] Per-organization money wallet (`WalletLedgerEntry`, append-only); superadmin credits/debits it from the organization page; tenants see balance, next charge and ledger on Billing
+- [x] A credit renews/re-enrols a lapsed, provider-less subscription from the wallet (`applyWalletToSubscription`); wallet-managed subscriptions also renew on read and in the daily cron (`settleDueSubscriptions`)
+- [x] Superadmin "give a plan at no cost until a date": afterwards revert to the original plan, or stay on the plan at a custom price billed from the wallet (`walletSettlement.ts`, tested)
+- [x] Tenants can pay for a plan from their wallet (`/tenant/wallet/checkout`)
+- [ ] Wallet is one currency per organization (its plan's currency); no top-up by card yet
+- [ ] A wallet-managed subscription that can't pay goes PAST_DUE (locks to free-tier features); no grace period or reminder email yet
+- [x] Provider payments credit the wallet first: Stripe/Paystack checkouts and Stripe renewals add a `PAYMENT` ledger entry (idempotent on the provider event), then the wallet buys/renews the plan. Provider-billed subscriptions get a 3-day grace before `PAST_DUE`
+- [ ] Paystack plan renewals still aren't matched to an organization (no metadata on renewal `charge.success`), so they don't credit the wallet yet
+- [ ] Changing plan while a provider subscription is live leaves the provider charging its old amount; the difference accumulates in (or drains) the wallet. Consider cancelling/re-creating the provider subscription on plan change
+
+## Beyond healthcare: templates, online booking, wording (2026-10-20)
+
+- [x] Flow templates for every industry (restaurant, salon, bank, government office, shop/service centre, school office, single counter) beside the outpatient clinic; `services/flowTemplates.data.ts`
+- [x] Flow designer "Start from a template": industry filter (the organisation's own first) and a left-to-right preview of the steps, who can book, and what waits for payment, before applying (`components/flow/FlowTemplatePicker.tsx`)
+- [x] Per-service booking mode (`Service.bookingMode`: WALK_IN, APPOINTMENT, BOTH), set in the add-service wizard and the edit form; templates carry sensible defaults
+- [x] Public join page: "Join the line now" / "Book a time" when a location offers both; kiosks only issue tickets; appointment-only services refuse walk-in joins (`APPOINTMENT_ONLY`)
+- [x] Online booking without an account: day and time picker, name + phone/email, confirmation email, private manage link `/booking/<token>` to change, cancel and check in on arrival (booked-arrival ordering applies); `publicBooking.controller.ts`, shared rules in `booking.service.ts`
+- [x] Staff Appointments page marks "Booked online"; reminders already cover online bookings
+- [x] Customer-facing wording made neutral: settings, placeholders, privacy and terms, landing page, service point type labels
+- [ ] Online booking has no OTP/verification (open booking, rate limited); consider code verification per location if abuse appears
+- [ ] No SMS/WhatsApp confirmation at booking time (email only; the daily reminder covers both)
+- [ ] Booking page times use the visitor's calendar day; the location's timezone is used for display only
+- [ ] Landing page demo screens (lobby scene) are still clinic-themed
+- [ ] Connect/EMR API field names (`patient`) stay as the integration contract
+
+## Neutral integrations and table/seat/payment review (2026-10-20)
+
+- [x] Integration wording is system-neutral (CRM, point-of-sale, reservations, records system, EMR): connections panel, plan feature labels, settings, desk card, server messages, README and Connect docs. API field names (`patient`, `encounter`) stay for compatibility and are explained in the docs
+- [x] Review written: `specs/2026-10-20-table-seat-booking-and-payments-review.md`
+- [x] Party size / seats: `Service.bookingUnit` PERSON, slot capacity counted in people, party stepper on the booking page, staff can book any size
+- [x] One-off sessions (events, tickets, classes) with name, seats and price; `Service.recurringSlots` off = sessions only
+- [x] Customers pay when booking (deposit / full / at venue): price per booking or person, 10-minute hold (`PENDING_PAYMENT`), Stripe + Paystack hosted checkout, webhook confirmation (idempotent, forged ids ignored, late payment revives or is refunded), cron expiry, refunds by cutoff (staff cancel = full)
+- [x] Two ways to get paid: the organization's own keys (paid plans, feature `ownPaymentKeys`) or collected by the platform into a per-organization payout wallet (hold days, fee %, minimum payout; request, review, mark paid / reject). Pages: Payments (org), Payouts (superadmin)
+- [x] Connect: `partySize` and `payment` on `PUT /appointments`, appointment responses and `appointment.*` events (additive within v1); public-page bookings announce `appointment.created` once confirmed/paid
+- [x] Booking payments: provider code tested for real signatures (Stripe's own library signs and verifies; Paystack HMAC), exact request bodies, and the whole paid-booking lifecycle against a real Postgres. Still to do by hand: one test-mode payment with live keys
+- [x] An abandoned checkout can be resumed from the booking page while the hold lasts ("Continue to payment"), and a booking awaiting payment can be cancelled
+- [ ] Payout wallet is one currency per organization; changing it is blocked once there is activity
+- [x] Paystack payments require a real email (checked on the server and in the form)
+- [ ] Table assignment (named tables) and per-service refund tiers
+
+## Currencies (2026-10-22)
+
+- [x] Organization currency (`Organization.currency`, was `bookingCurrency`): chosen at sign-up (time-zone guess preselected) and on the Welcome setup; used for plan prices, wallet, add-ons and booking payments
+- [x] Superadmin **Currencies** page: supported list with rates against the base (USD); in-use currencies can't be removed; warns about in-use currencies without a rate
+- [x] Plans priced by currency: hand-set `PlanCurrencyPrice` per currency, otherwise converted at the platform rate; checkout, wallet settlement, `/plans` and add-on pricing use the organization's currency
+- [x] Changing an organization's currency is blocked once wallet/payout activity or a card subscription exists
+- [x] "Refresh from market rates" on the Currencies page (open.er-api.com, checked live); manual edits still work
+- [x] Superadmin can change an organization's currency from its page once the wallet and payout wallet are at zero, no payout is open, no booking awaits payment and no card subscription runs
+- [x] Dashboard revenue is converted to the base currency (and counts quarterly plans)
+- [x] Existing organizations take their plan's currency in the migration, so running subscriptions stay in the currency they bill in
+
+## Rooms, tables, seat maps (2026-10-23)
+
+- [x] Rooms within locations (`Room`): own rules (online-bookable or staff-only, party limits, hours/days, combining tables) and rates (inherit / surcharge / override, per booking or person, own payment and refund terms). Services and desks (service point instances) can sit in a room
+- [x] Named tables/seats (`DiningTable`) in rooms; a booking holds one or more (`BookingTable`); auto-assignment picks the smallest free fit, combines the nearest tables for big parties, respects room rules; concurrency-safe (advisory lock), verified with two simultaneous bookings on a real database
+- [x] Visual floor-plan designer: drag tables on a canvas, shape/size/rotation/seats, row generator, snap to grid, keyboard nudging, background picture of the real room (uploaded to the platform's file storage)
+- [x] Seat map for customers (tap tables/seats, or be assigned), staff "Change table" on Appointments, and a host "Tonight" view per room
+- [x] Industry gating (`industryFeatures`): rooms for every industry, tables and floor plans only for restaurants, salons, education and "other"; UI hides them and the API refuses them elsewhere
+- [x] Refund tiers by notice (service and room level) replace the single cutoff when set; the manage page shows what would come back now
+- [x] Daily automatic exchange-rate refresh (optional, Currencies page; daily cron)
+- [x] Staff moving a booking into a room with another rate reprice it: the host confirms the new price first (409 with the figures), a dearer room leaves a balance to settle at the venue, a cheaper one refunds the difference (retry-safe if the refund fails); prices reported by a connected system are never touched
+- [x] Designer: resize handles (work on turned tables), rotate handle, drag-box and Shift-click multi-select, group move, align/space evenly, undo/redo, zoom, Ctrl+A/D, clicked through in a browser
+- [x] Templates lay out rooms and floor plans (restaurant, salon, new "Class, workshop or event" hall) with a preview in the picker; tables are skipped for industries without them; applying again changes nothing
+- [x] Connect: `GET /rooms`, `GET /rooms/{room}/availability`, and `tables` / `room` on `PUT /appointments` (auto or named tables, 409 `TABLE_UNAVAILABLE`, 422 `TABLES_NOT_AVAILABLE`); verified on a real database including two simultaneous requests for one table
+- [x] Fixed an import cycle (booking.service / tables.service) that would crash when booking.service loaded first: `BookingError` now lives in `bookingError.ts`
+- [x] Fixed invalid YAML in `openapi.yaml` (a test now parses it and checks every `$ref`)
+- [ ] Not exercised: live Stripe/Paystack test-mode payments (no keys here); picture upload needs a configured file-storage provider
+- [ ] Moving a booking between rooms in Klargy's UI with a priced booking was covered by tests and a real database, not clicked in a browser

@@ -1,5 +1,7 @@
 'use client';
 
+import { industryFeatures } from '@/lib/terms';
+import ServiceBookingFields, { defaultBookingFields, type BookingFields } from '@/components/services/ServiceBookingFields';
 import NoOrganization from '@/components/NoOrganization';
 import { toast, errorMessage } from '@/lib/toast';
 import React, { useEffect, useState, useCallback } from 'react';
@@ -39,7 +41,7 @@ interface LinkedServicePoint {
   defaultCapacity?: number;  // Original service point capacity
 }
 
-interface ServiceFormData {
+interface ServiceFormData extends BookingFields {
   name: string;
   description: string;
   type: ServiceType;
@@ -49,6 +51,7 @@ interface ServiceFormData {
   endTime: string;
   activeDays: string;
   requiresClearance: boolean;
+  bookingMode: 'WALK_IN' | 'APPOINTMENT' | 'BOTH';
 }
 
 const ServicesPage: React.FC = () => {
@@ -69,6 +72,7 @@ const ServicesPage: React.FC = () => {
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [editServicePoints, setEditServicePoints] = useState<WizardServicePoint[]>([]);
+  const [locationRooms, setLocationRooms] = useState<{ id: string; name: string }[]>([]);
 
   const [formData, setFormData] = useState<ServiceFormData>({
     name: '',
@@ -80,6 +84,8 @@ const ServicesPage: React.FC = () => {
     endTime: '17:00',
     activeDays: '1,2,3,4,5',
     requiresClearance: false,
+    bookingMode: 'WALK_IN',
+    ...defaultBookingFields,
   });
 
   const loadOrganizations = useCallback(async () => {
@@ -154,6 +160,7 @@ const ServicesPage: React.FC = () => {
       requiresPhone: data.requiresPhone,
       allowAnonymous: data.allowAnonymous,
       requiresClearance: data.requiresClearance,
+      bookingMode: data.bookingMode,
       displayMode: data.displayMode || undefined,
       slotDuration: data.slotDuration,
       concurrentLimit: data.concurrentLimit,
@@ -177,6 +184,7 @@ const ServicesPage: React.FC = () => {
     try {
       await api.updateService(editingService.id, {
         ...formData,
+        refundTiers: formData.refundTiers.filter((t) => t.hours !== '' && t.percent !== '').map((t) => ({ hours: Number(t.hours), percent: Number(t.percent) })),
         servicePoints: editServicePoints.map(sp => ({ servicePointId: sp.servicePointId, capacity: sp.capacity })),
       });
       await loadServices(selectedLocation);
@@ -219,7 +227,22 @@ const ServicesPage: React.FC = () => {
       endTime: service.endTime || '17:00',
       activeDays: service.activeDays || '1,2,3,4,5',
       requiresClearance: !!service.requiresClearance,
+      bookingMode: service.bookingMode ?? 'WALK_IN',
+      bookingUnit: service.bookingUnit ?? 'BOOKING',
+      minPartySize: service.minPartySize ?? 1,
+      maxPartySize: service.maxPartySize ?? 8,
+      recurringSlots: service.recurringSlots ?? true,
+      price: service.price == null ? '' : String(service.price),
+      priceBasis: service.priceBasis ?? 'BOOKING',
+      paymentMode: service.paymentMode ?? 'NONE',
+      depositPercent: service.depositPercent ?? 30,
+      refundCutoffHours: service.refundCutoffHours ?? 24,
+      refundTiers: ((service as { refundTiers?: { hours: number; percent: number }[] | null }).refundTiers ?? []).map((t) => ({ hours: String(t.hours), percent: String(t.percent) })),
+      tableMode: (service as { tableMode?: 'NONE' | 'AUTO' }).tableMode ?? 'NONE',
+      roomId: (service as { roomId?: string | null }).roomId ?? '',
     });
+    setLocationRooms([]);
+    if (industryFeatures(user?.organization?.industry).rooms) api.listRooms(service.locationId).then((r) => setLocationRooms(r.rooms.map((x) => ({ id: x.id, name: x.name })))).catch(() => {});
     const linked = await api.getServicePointsForService(service.id);
     setEditServicePoints(linked.map((sp: LinkedServicePoint) => ({
       servicePointId: sp.id,
@@ -247,6 +270,8 @@ const ServicesPage: React.FC = () => {
       endTime: '17:00',
       activeDays: '1,2,3,4,5',
       requiresClearance: false,
+      bookingMode: 'WALK_IN',
+      ...defaultBookingFields,
     });
   };
 
@@ -525,6 +550,34 @@ const ServicesPage: React.FC = () => {
                   style={{ ...inputStyle, resize: 'vertical' }}
                 />
               </div>
+
+              <div style={formFieldFull}>
+                <label style={labelStyle}>How customers get in</label>
+                <select
+                  value={formData.bookingMode}
+                  onChange={(e) => setFormData({ ...formData, bookingMode: e.target.value as ServiceFormData['bookingMode'] })}
+                  style={inputStyle}
+                >
+                  <option value="WALK_IN">Walk-in only: customers join the line now</option>
+                  <option value="APPOINTMENT">Appointments only: customers book a time, then check in</option>
+                  <option value="BOTH">Both: join now or book a time</option>
+                </select>
+              </div>
+
+              {formData.bookingMode !== 'WALK_IN' && (
+                <div style={formFieldFull}>
+                  <label style={labelStyle}>Online booking and payment</label>
+                  <ServiceBookingFields
+                    value={formData}
+                    onChange={(next) => setFormData({ ...formData, ...next })}
+                    serviceId={editingService?.id}
+                    slotDuration={formData.slotDuration}
+                    features={industryFeatures(user?.organization?.industry)}
+                    rooms={locationRooms}
+                    currency={organizations.find((o) => o.id === selectedOrg)?.currency ?? 'USD'}
+                  />
+                </div>
+              )}
 
               <div style={formFieldFull}>
                 <Checkbox

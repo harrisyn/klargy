@@ -9,6 +9,8 @@ import { Icon, Card, Badge, Button, UsageBar, Input, Select } from '@/components
 import type { BadgeTone } from '@/components/ui';
 import { buildTenantUrl } from '@/lib/subdomain';
 import { confirmDialog, promptDialog } from '@/lib/dialog';
+import { OrgWalletCard } from '@/components/billing/OrgWalletCard';
+import { OrgCurrencyCard } from '@/components/billing/OrgCurrencyCard';
 
 interface OrganizationDetail {
   id: string;
@@ -529,6 +531,10 @@ export default function OrganizationDetailPage({
           </div>
         </Card>
       </div>
+
+      <OrgCurrencyCard organizationId={id} current={(org as { currency?: string } | null)?.currency} onChanged={loadOrganization} />
+
+      <OrgWalletCard organizationId={id} onChanged={loadOrganization} />
 
       {/* Grant Credits */}
       <Card style={{ padding: '1.5rem', marginBottom: '2rem' }}>

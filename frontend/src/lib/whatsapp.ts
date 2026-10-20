@@ -60,7 +60,7 @@ export const WHATSAPP_PROVIDERS: WhatsAppProviderSpec[] = [
     label: 'WhatsApp Web (linked phone)',
     note: 'A self-hosted go-whatsapp-web-multidevice server with a phone linked to it. Plain messages, no templates.',
     fields: [
-      { key: 'baseUrl', label: 'Server address', required: true, placeholder: 'https://wa.yourclinic.com' },
+      { key: 'baseUrl', label: 'Server address', required: true, placeholder: 'https://wa.yourbusiness.com' },
       { key: 'deviceId', label: 'Device ID', placeholder: 'default' },
     ],
     secrets: [{ key: 'basicAuth', label: 'Basic auth', placeholder: 'username:password', hint: 'Only if the server asks for it (WHATSAPP_API_BASIC_AUTH_CREDENTIAL).' }],

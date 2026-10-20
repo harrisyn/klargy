@@ -5,6 +5,7 @@ import { Plus, CreditCard, Pencil, Trash2, Check, X } from 'lucide-react';
 import api from '@/api/client';
 import { Icon, PageHeader, Card, Badge, Button, Modal, Checkbox, Switch, Input, Textarea, Select } from '@/components/ui';
 import { confirmDialog } from '@/lib/dialog';
+import PlanCurrencyPrices, { currencyPricesPayload, toCurrencyPriceForm, type CurrencyConfigInfo, type CurrencyPriceForm } from '@/components/billing/PlanCurrencyPrices';
 
 interface SubscriptionPlan {
   id: string;
@@ -30,6 +31,7 @@ interface SubscriptionPlan {
   upgradePlanId: string | null;
   creditAllowances?: { creditType: 'AI' | 'EMAIL' | 'SMS'; monthlyAllowance: number | null }[];
   addOnPricingOverrides?: { resourceType: 'LOCATIONS' | 'USERS' | 'DISPLAY_MEDIA'; pricePerUnitMonthly: string; pricePerUnitOneOff: string }[];
+  currencyPrices?: { currency: string; priceMonthly: string; priceQuarterly: string; priceYearly: string }[];
   _count: {
     subscriptions: number;
   };
@@ -89,10 +91,11 @@ const defaultFeatures = [
   { key: 'serviceFlows', label: 'Journeys between services' },
   { key: 'smsNotifications', label: 'Text message alerts' },
   { key: 'whatsappNotifications', label: 'WhatsApp messages' },
+  { key: 'ownPaymentKeys', label: 'Own payment account for bookings' },
   { key: 'customBranding', label: 'Own logo and colour' },
   { key: 'customDomain', label: 'Custom domain' },
   { key: 'apiAccess', label: 'API and integrations' },
-  { key: 'emrIntegration', label: 'EMR connection' },
+  { key: 'emrIntegration', label: 'Connected systems (CRM, POS, EMR)' },
   { key: 'displayMedia', label: 'Adverts on lobby screens' },
 ];
 
@@ -128,9 +131,12 @@ export default function PlansPage() {
     upgradePlanId: null as string | null,
     creditAllowances: { AI: null, EMAIL: null, SMS: null } as CreditAllowances,
     addOnPricingOverrides: EMPTY_ADDON_OVERRIDES as AddOnOverrideForm,
+    currencyPrices: {} as CurrencyPriceForm,
   });
+  const [currencyConfig, setCurrencyConfig] = useState<CurrencyConfigInfo>({ base: 'USD', rates: { USD: 1 } });
 
   useEffect(() => {
+    api.getCurrencySettings().then((c) => setCurrencyConfig({ base: c.base, rates: c.rates })).catch(() => {});
     loadPlans();
     loadGlobalAddOnPricing();
   }, []);
@@ -182,6 +188,7 @@ export default function PlansPage() {
       upgradePlanId: null,
       creditAllowances: { AI: null, EMAIL: null, SMS: null },
       addOnPricingOverrides: EMPTY_ADDON_OVERRIDES,
+      currencyPrices: {},
     });
     setShowModal(true);
   };
@@ -211,6 +218,7 @@ export default function PlansPage() {
       upgradePlanId: plan.upgradePlanId,
       creditAllowances: creditAllowancesToForm(plan.creditAllowances),
       addOnPricingOverrides: addOnOverridesToForm(plan.addOnPricingOverrides),
+      currencyPrices: toCurrencyPriceForm(plan.currencyPrices),
     });
     setShowModal(true);
   };
@@ -246,6 +254,7 @@ export default function PlansPage() {
           upgradePlanId: form.upgradePlanId,
           creditAllowances: form.creditAllowances,
           addOnPricingOverrides: formToAddOnOverridesPayload(form.addOnPricingOverrides),
+          currencyPrices: currencyPricesPayload(form.currencyPrices),
         });
       } else {
         await api.createSubscriptionPlan({
@@ -270,6 +279,7 @@ export default function PlansPage() {
           upgradePlanId: form.upgradePlanId,
           creditAllowances: form.creditAllowances,
           addOnPricingOverrides: formToAddOnOverridesPayload(form.addOnPricingOverrides),
+          currencyPrices: currencyPricesPayload(form.currencyPrices),
         });
       }
       setShowModal(false);
@@ -458,7 +468,7 @@ export default function PlansPage() {
 
           <div style={formRow}>
             <Input
-              label="Monthly Price ($)"
+              label={`Monthly Price (${form.currency})`}
               type="number"
               value={form.priceMonthly}
               onChange={(e) => setForm({ ...form, priceMonthly: parseFloat(e.target.value) || 0 })}
@@ -466,7 +476,7 @@ export default function PlansPage() {
               step="0.01"
             />
             <Input
-              label="Quarterly Price ($)"
+              label={`Quarterly Price (${form.currency})`}
               type="number"
               value={form.priceQuarterly}
               onChange={(e) => setForm({ ...form, priceQuarterly: parseFloat(e.target.value) || 0 })}
@@ -476,7 +486,7 @@ export default function PlansPage() {
           </div>
           <div style={formRow}>
             <Input
-              label="Yearly Price ($)"
+              label={`Yearly Price (${form.currency})`}
               type="number"
               value={form.priceYearly}
               onChange={(e) => setForm({ ...form, priceYearly: parseFloat(e.target.value) || 0 })}
@@ -492,6 +502,20 @@ export default function PlansPage() {
               placeholder="No time limit"
             />
           </div>
+
+          <div style={formRow}>
+            <Select label="Plan currency" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
+              {[...new Set([form.currency, ...Object.keys(currencyConfig.rates)])].map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+            <div />
+          </div>
+          <PlanCurrencyPrices
+            config={currencyConfig}
+            planCurrency={form.currency}
+            prices={{ monthly: form.priceMonthly, quarterly: form.priceQuarterly, yearly: form.priceYearly }}
+            value={form.currencyPrices}
+            onChange={(next) => setForm({ ...form, currencyPrices: next })}
+          />
 
           <h4 style={{ ...sectionTitle, marginTop: '0.5rem' }}>Limits (leave empty for unlimited)</h4>
           <div style={formRow}>

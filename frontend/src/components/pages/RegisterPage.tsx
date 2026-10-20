@@ -28,9 +28,23 @@ const slugify = (value: string) =>
 
 type SlugState = 'idle' | 'checking' | 'free' | 'taken' | 'invalid';
 
+/** The currency people in a time zone most likely use, or null. */
+function guessCurrency(timeZone: string): string | null {
+  const byZone: Record<string, string> = {
+    'Africa/Accra': 'GHS', 'Africa/Lagos': 'NGN', 'Africa/Nairobi': 'KES', 'Africa/Johannesburg': 'ZAR', 'Africa/Kampala': 'UGX',
+    'Africa/Dar_es_Salaam': 'TZS', 'Africa/Kigali': 'RWF', 'Africa/Cairo': 'EGP', 'Europe/London': 'GBP', 'Europe/Dublin': 'EUR',
+    'Europe/Paris': 'EUR', 'Europe/Berlin': 'EUR', 'Europe/Madrid': 'EUR', 'Europe/Rome': 'EUR', 'Asia/Kolkata': 'INR',
+    'Asia/Dubai': 'AED', 'Australia/Sydney': 'AUD', 'America/Toronto': 'CAD', 'America/New_York': 'USD', 'America/Chicago': 'USD',
+    'America/Los_Angeles': 'USD',
+  };
+  return byZone[timeZone] ?? null;
+}
+
 export default function RegisterPage() {
   const [step, setStep] = useState<'details' | 'code' | 'done'>('details');
   const [form, setForm] = useState({ organizationName: '', firstName: '', lastName: '', email: '', password: '' });
+  const [currencies, setCurrencies] = useState<string[]>([]);
+  const [currency, setCurrency] = useState('');
   const [slug, setSlug] = useState('');
   const [slugEdited, setSlugEdited] = useState(false);
   const [editingSlug, setEditingSlug] = useState(false);
@@ -44,6 +58,17 @@ export default function RegisterPage() {
 
   const rootHost = buildRootUrl().replace(/^https?:\/\//, '').replace(/\/$/, '');
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  // Supported currencies, preselecting the likely one for where the visitor is.
+  useEffect(() => {
+    api.getPublicCurrencies()
+      .then(({ base, currencies: list }) => {
+        setCurrencies(list);
+        const guess = guessCurrency(Intl.DateTimeFormat().resolvedOptions().timeZone);
+        setCurrency(guess && list.includes(guess) ? guess : base);
+      })
+      .catch(() => {});
+  }, []);
 
   // Suggest the workspace address from the organization name until the
   // person edits it themselves.
@@ -106,6 +131,7 @@ export default function RegisterPage() {
         adminLastName: form.lastName.trim(),
         adminPassword: form.password,
         slug: slug || undefined,
+        currency: currency || undefined,
       });
       setStep('done');
       // Sign-in lives per address, so carry the session over in the URL
@@ -150,7 +176,7 @@ export default function RegisterPage() {
           <form className="authx-fields" onSubmit={submitDetails}>
             <div className="field">
               <label htmlFor="org" className="field-label">Organization</label>
-              <input id="org" value={form.organizationName} onChange={set('organizationName')} placeholder="e.g. Ridge Family Clinic" autoComplete="organization" autoFocus required />
+              <input id="org" value={form.organizationName} onChange={set('organizationName')} placeholder="e.g. Ridge Studio, Ridge Bank, Ridge Clinic" autoComplete="organization" autoFocus required />
               {slug && !editingSlug && (
                 <p className="authx-hint">
                   Your address: <strong>{slug}.{rootHost}</strong>{' '}
@@ -189,6 +215,15 @@ export default function RegisterPage() {
               <label htmlFor="email" className="field-label">Work email</label>
               <input id="email" type="email" value={form.email} onChange={set('email')} autoComplete="email" required />
             </div>
+            {currencies.length > 1 && (
+              <div className="field">
+                <label htmlFor="currency" className="field-label">Currency</label>
+                <select id="currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                  {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <p className="authx-hint">Used for your plan, your wallet and any prices you charge. You can’t change it once money has moved.</p>
+              </div>
+            )}
             <div className="field">
               <label htmlFor="password" className="field-label">Password</label>
               <div className="authx-password">

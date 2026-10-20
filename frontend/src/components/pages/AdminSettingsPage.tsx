@@ -48,13 +48,13 @@ interface Organization {
 
 interface Arrival { enabled: boolean; earlyMinutes: number; lateMinutes: number; maxBookedShare: number }
 const DEFAULT_ARRIVAL: Arrival = { enabled: true, earlyMinutes: 10, lateMinutes: 15, maxBookedShare: 50 };
-// Share of the people placed ahead of a walk-in who may be booked patients that arrived after them.
+// Share of the people placed ahead of a walk-in who may be booked people that arrived after them.
 const SHARE_CHOICES = [
   { value: 0, label: 'None: walk-ins who arrived first always stay ahead' },
-  { value: 50, label: 'Half: one booked patient, then one walk-in' },
-  { value: 67, label: 'Two thirds: two booked patients, then one walk-in' },
-  { value: 75, label: 'Three quarters: three booked patients, then one walk-in' },
-  { value: 100, label: 'No limit: booked patients always go by their booked time' },
+  { value: 50, label: 'Half: one booked person, then one walk-in' },
+  { value: 67, label: 'Two thirds: two booked people, then one walk-in' },
+  { value: 75, label: 'Three quarters: three booked people, then one walk-in' },
+  { value: 100, label: 'No limit: booked people always go by their booked time' },
 ];
 const minutesIn = (value: string) => Math.min(240, Math.max(0, Math.round(Number(value) || 0)));
 
@@ -89,7 +89,7 @@ const TYPE_LABEL: Record<string, string> = { text: 'Text', tel: 'Phone', email: 
 const NAME_ORDER = ['name', 'fullName', 'firstName', 'lastName', 'phone', 'email'];
 
 const DISPLAY_MODES = [
-  { value: 'TICKET_ONLY', label: 'Ticket number only', note: 'Most private. Recommended for clinics.' },
+  { value: 'TICKET_ONLY', label: 'Ticket number only', note: 'Most private. Recommended where names are sensitive.' },
   { value: 'NAME_AND_TICKET', label: 'Number and short name', note: 'First name and initial, so people spot their call faster.' },
   { value: 'FULL_INFO', label: 'Number, full name and service', note: 'Only where names on a screen are acceptable.' },
 ];
@@ -132,7 +132,7 @@ export default function AdminSettingsPage() {
   const [notify, setNotify] = useState({ turnApproachingAt: 3, email: true, sms: false });
   const [arrival, setArrival] = useState<Arrival>(DEFAULT_ARRIVAL);
   const [brand, setBrand] = useState({ primaryColor: '', hidePoweredBy: false });
-  // '' = off; 'mrNumber' | 'memberNumber' = checked with the EMR before a ticket is issued.
+  // '' = off; 'mrNumber' | 'memberNumber' = checked with the system before a ticket is issued.
   const [joinIdentifier, setJoinIdentifier] = useState('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -441,7 +441,7 @@ export default function AdminSettingsPage() {
               <div className="settings-inline">
                 <input
                   aria-label="New field name"
-                  placeholder="e.g. Referring doctor"
+                  placeholder="e.g. Referred by"
                   value={newField.label}
                   onChange={(e) => setNewField({ ...newField, label: e.target.value })}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomField(); } }}
@@ -465,8 +465,8 @@ export default function AdminSettingsPage() {
                   <option value="memberNumber">Ask for their member number</option>
                 </select>
                 <small>
-                  On the kiosk and the join page. Only works when an EMR connection can look {terms.people} up. A number it
-                  doesn’t know is turned away; if the EMR can’t be reached, they still get a ticket marked “identifier not verified”.
+                  On the kiosk and the join page. Only works when a system connection can look {terms.people} up. A number it
+                  doesn’t know is turned away; if the system can’t be reached, they still get a ticket marked “identifier not verified”.
                 </small>
               </label>
             </section>
@@ -546,7 +546,7 @@ export default function AdminSettingsPage() {
               <label className="settings-field settings-narrow">
                 <span>…until this many minutes after it</span>
                 <input type="number" min={0} max={240} value={arrival.lateMinutes} disabled={!arrival.enabled} onChange={(e) => setArrival({ ...arrival, lateMinutes: minutesIn(e.target.value) })} />
-                <small>Anyone arriving outside this window joins as a walk-in. 10 before and 15 after suits most clinics.</small>
+                <small>Anyone arriving outside this window joins as a walk-in. 10 before and 15 after suits most places.</small>
               </label>
               <label className="settings-field">
                 <span>How many booked {terms.people} may go ahead of a walk-in who was already waiting</span>
@@ -556,7 +556,7 @@ export default function AdminSettingsPage() {
                     : [...SHARE_CHOICES, { value: arrival.maxBookedShare, label: `${arrival.maxBookedShare}% booked` }]
                   ).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
-                <small>Keeps walk-ins moving when several booked patients arrive together.</small>
+                <small>Keeps walk-ins moving when several booked people arrive together.</small>
               </label>
               {!arrival.enabled && (
                 <p className="settings-note">Off: appointments checked in by staff go ahead of walk-ins, and appointments checked in from a connected system join by arrival.</p>
@@ -628,7 +628,7 @@ export default function AdminSettingsPage() {
           {section === 'domain' && (
             <section aria-labelledby="s-domain">
               <h2 id="s-domain">Custom domain</h2>
-              <p className="settings-lede">Serve your sign-in and ticket pages from your own address, such as queue.yourclinic.com.</p>
+              <p className="settings-lede">Serve your sign-in and ticket pages from your own address, such as queue.yourbusiness.com.</p>
               {!hasFeature('customDomain') ? (
                 <p className="settings-locked"><Lock size={18} /> Custom domains aren’t included in your plan. <a href="/admin/billing">See plans</a></p>
               ) : (
@@ -636,7 +636,7 @@ export default function AdminSettingsPage() {
                   {domainMessage && <div className={`inline-alert inline-alert-${domainMessage.type === 'success' ? 'success' : 'error'}`} style={{ marginBottom: '1rem' }}>{domainMessage.text}</div>}
                   {!customDomain ? (
                     <div className="settings-inline">
-                      <input aria-label="Domain" value={domainInput} onChange={(e) => setDomainInput(e.target.value)} placeholder="queue.yourclinic.com" />
+                      <input aria-label="Domain" value={domainInput} onChange={(e) => setDomainInput(e.target.value)} placeholder="queue.yourbusiness.com" />
                       <Button type="button" disabled={!domainInput.trim() || domainBusy} onClick={() => domainAction(async () => {
                         setCustomDomain(await api.setCustomDomain(organization.id, domainInput.trim()));
                         setDomainInput('');

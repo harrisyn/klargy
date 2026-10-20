@@ -12,6 +12,7 @@ export interface SubscriptionFeatures {
   maxUsers: number;
   smsNotifications: boolean;
   whatsappNotifications: boolean;
+  ownPaymentKeys: boolean;
   analytics: boolean;
   apiAccess: boolean;
   emrIntegration: boolean;
@@ -63,6 +64,7 @@ const DEFAULT_FEATURES: SubscriptionFeatures = {
   maxUsers: 5,
   smsNotifications: false,
   whatsappNotifications: false,
+  ownPaymentKeys: false,
   analytics: false,
   apiAccess: false,
   emrIntegration: false,
@@ -210,9 +212,10 @@ const FEATURE_NAMES: Record<keyof SubscriptionFeatures, string> = {
   maxUsers: 'More staff',
   smsNotifications: 'Text message alerts',
   whatsappNotifications: 'WhatsApp messages',
+  ownPaymentKeys: 'Your own payment account for bookings',
   analytics: 'Analytics',
   apiAccess: 'API access',
-  emrIntegration: 'An EMR connection',
+  emrIntegration: 'Connecting your CRM, POS or other system',
   customBranding: 'Your own branding',
   customDomain: 'A custom domain',
   serviceFlows: 'Journeys between services',

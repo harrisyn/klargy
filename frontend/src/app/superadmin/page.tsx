@@ -16,6 +16,7 @@ interface DashboardStats {
     totalLocations: number;
     totalUsers: number;
     mrr: string;
+    mrrCurrency?: string;
   };
   planBreakdown: Array<{
     id: string;
@@ -85,7 +86,7 @@ export default function SuperadminDashboard() {
         <div><b>{stats.totalOrganizations}</b><span>organizations</span></div>
         <div><b>{stats.activeSubscriptions}</b><span>paying or active plans</span></div>
         <div><b>{stats.trialSubscriptions}</b><span>on a trial</span></div>
-        <div><b>${stats.mrr}</b><span>monthly revenue</span></div>
+        <div><b>{stats.mrrCurrency ?? 'USD'} {stats.mrr}</b><span>monthly revenue</span></div>
         <div><b>{stats.totalLocations}</b><span>locations</span></div>
         <div><b>{stats.totalUsers}</b><span>people with accounts</span></div>
       </section>

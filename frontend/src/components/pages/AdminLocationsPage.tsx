@@ -485,7 +485,7 @@ export default function AdminLocationsPage() {
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g., Main Branch, Downtown Clinic"
+                    placeholder="e.g., Main Branch, Downtown"
                     required
                     style={inputStyle}
                   />
@@ -555,11 +555,11 @@ export default function AdminLocationsPage() {
                     type="text"
                     value={formData.externalReference}
                     onChange={(e) => setFormData({ ...formData, externalReference: e.target.value })}
-                    placeholder="e.g., ERP Location ID, HIS code"
+                    placeholder="e.g., CRM branch ID, POS location code"
                     style={inputStyle}
                   />
                   <p style={helpText}>
-                    Integration ID for external systems (ERP, HIS, etc.)
+                    Integration ID for external systems (CRM, POS, ERP, EMR, etc.)
                   </p>
                 </div>
               </div>

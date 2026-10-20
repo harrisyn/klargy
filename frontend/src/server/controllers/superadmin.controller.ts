@@ -1,3 +1,6 @@
+import { savePlanCurrencyPrices, planForCurrency, CurrencyError } from '../services/currency.service';
+import { monthlyRecurringRevenue } from '../services/revenue.service';
+import { loadCaller } from '../middleware/tenantScope.middleware';
 import { Request, Response, NextFunction } from 'express';
 import { signToken } from '../lib/jwt';
 import prisma from '../lib/prisma';
@@ -400,6 +403,7 @@ export const listPlans = async (req: Request, res: Response, next: NextFunction)
         },
         creditAllowances: true,
         addOnPricingOverrides: true,
+        currencyPrices: true,
       },
       orderBy: { displayOrder: 'asc' },
     });
@@ -538,6 +542,9 @@ export const createPlan = async (req: Request, res: Response, next: NextFunction
     if (addOnPricingOverrides) {
       await upsertAddOnPricingOverrides(plan.id, addOnPricingOverrides);
     }
+    if (req.body.currencyPrices !== undefined) {
+      await savePlanCurrencyPrices(plan.id, plan.currency, req.body.currencyPrices);
+    }
 
     res.status(201).json(plan);
   } catch (error) {
@@ -630,6 +637,9 @@ export const updatePlan = async (req: Request, res: Response, next: NextFunction
     }
     if (addOnPricingOverrides) {
       await upsertAddOnPricingOverrides(plan.id, addOnPricingOverrides);
+    }
+    if (req.body.currencyPrices !== undefined) {
+      await savePlanCurrencyPrices(plan.id, plan.currency, req.body.currencyPrices);
     }
 
     res.json(plan);
@@ -743,20 +753,8 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
       }),
     ]);
 
-    // Calculate MRR (Monthly Recurring Revenue)
-    const subscriptions = await prisma.organizationSubscription.findMany({
-      where: { status: 'ACTIVE' },
-      include: { plan: true },
-    });
-
-    let mrr = 0;
-    subscriptions.forEach(sub => {
-      if (sub.billingCycle === 'yearly') {
-        mrr += Number(sub.plan.priceYearly) / 12;
-      } else {
-        mrr += Number(sub.plan.priceMonthly);
-      }
-    });
+    // Monthly recurring revenue, in the base currency (see revenue.service).
+    const revenue = await monthlyRecurringRevenue();
 
     res.json({
       stats: {
@@ -768,7 +766,8 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
         }),
         totalLocations,
         totalUsers,
-        mrr: mrr.toFixed(2),
+        mrr: revenue.total.toFixed(2),
+        mrrCurrency: revenue.currency,
       },
       planBreakdown: planBreakdown.map(p => ({
         id: p.id,
@@ -875,6 +874,24 @@ export const getOrganizationUsage = async (req: Request, res: Response, next: Ne
       subscription: organization.subscription,
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+/** The plans as the signed-in organization pays for them: in its own currency. Platform admins get the raw plans. */
+export const listPlansForCaller = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const caller = await loadCaller(req);
+    if (!caller?.organizationId) return listPlans(req, res, next);
+    const org = await prisma.organization.findUnique({ where: { id: caller.organizationId }, select: { currency: true } });
+    const plans = await prisma.subscriptionPlan.findMany({
+      where: { isActive: true },
+      include: { _count: { select: { subscriptions: true } }, creditAllowances: true, addOnPricingOverrides: true, currencyPrices: true },
+      orderBy: { displayOrder: 'asc' },
+    });
+    res.json(await Promise.all(plans.map((p) => planForCurrency(p, org?.currency))));
+  } catch (error) {
+    if (error instanceof CurrencyError) return res.status(error.status).json({ error: error.message });
     next(error);
   }
 };

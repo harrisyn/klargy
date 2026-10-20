@@ -12,7 +12,7 @@ const STEPS = [
   { title: 'Scan and join', text: 'A QR code at the entrance or a kiosk at reception issues a ticket in seconds. No app to install.' },
   { title: 'Wait anywhere', text: 'The ticket page shows their place in line and the estimated wait, updating live.' },
   { title: 'Get called', text: 'Their number goes up on the screen with the desk to go to, and they get a text or email.' },
-  { title: 'Move on', text: 'Done with the doctor? Staff send them straight to the lab or pharmacy with a new ticket.' },
+  { title: 'Move on', text: 'Done at one desk? Staff send them straight to the next step, whether that is the cashier, the lab or the stylist, with a new ticket.' },
 ];
 
 function Tick({ children }: { children: React.ReactNode }) {
@@ -54,7 +54,7 @@ export default function LandingPage() {
             <h1 id="hero-title" className={styles.headline}>Run a calmer waiting room.</h1>
             <p className={styles.lede}>
               People scan a QR code, get a ticket on their phone, and are called to the right desk when it&apos;s
-              their turn. Clinics, banks, offices, service centres: anywhere people wait for a desk, room or counter.
+              their turn. Clinics, restaurants, salons, banks, offices, service centres: anywhere people wait for a table, desk, room or counter, or book a time and turn up for it.
             </p>
             <div className={styles.ctaRow}>
               <Link href="/register" className={styles.btnPrimary}>Start free</Link>

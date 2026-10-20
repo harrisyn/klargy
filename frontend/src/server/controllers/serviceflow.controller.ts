@@ -252,9 +252,25 @@ export const listFlowTemplates = async (_req: Request, res: Response) => {
       id: t.id,
       name: t.name,
       description: t.description,
-      services: t.services.map((s) => ({ name: s.name, requiresClearance: !!s.requiresClearance })),
+      industries: t.industries,
+      services: t.services.map((s) => ({
+        name: s.name,
+        description: s.description,
+        requiresClearance: !!s.requiresClearance,
+        bookingMode: s.bookingMode ?? 'WALK_IN',
+        slotDuration: s.slotDuration ?? 15,
+        partySize: s.partySize ?? null,
+        tables: !!s.tableMode,
+      })),
       flows: t.flows,
       defaultService: t.defaultService,
+      rooms: (t.rooms ?? []).map((r) => ({
+        name: r.name,
+        description: r.description,
+        layoutWidth: r.layoutWidth ?? 1000,
+        layoutHeight: r.layoutHeight ?? 700,
+        tables: r.tables.map((x) => ({ name: x.name, seats: x.seats, x: x.x, y: x.y, width: x.width ?? 90, height: x.height ?? 90, shape: x.shape ?? 'RECT', rotation: x.rotation ?? 0 })),
+      })),
     }))
   );
 };

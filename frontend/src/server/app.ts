@@ -3,6 +3,7 @@ import cors from 'cors';
 import routes from './routes';
 import { errorHandler } from './middleware/error.middleware';
 import { handleStripeWebhook, handlePaystackWebhook } from './controllers/paymentWebhook.controller';
+import { handleOrgBookingWebhook } from './controllers/bookingWebhook.controller';
 import { whatsappWebhook } from './controllers/whatsapp.controller';
 import { corsOrigin } from './lib/cors';
 import { getJwtSecret } from './lib/jwt';
@@ -46,6 +47,8 @@ function createApp(): Application {
   // parse the body, leaving nothing for verifyWebhookSignature to check).
   app.post('/api/v1/webhooks/stripe', express.raw({ type: 'application/json' }), handleStripeWebhook);
   app.post('/api/v1/webhooks/paystack', express.raw({ type: 'application/json' }), handlePaystackWebhook);
+  // An organization's own payment account, for booking payments.
+  app.post('/api/v1/webhooks/booking/:organizationId/:provider', express.raw({ type: 'application/json' }), handleOrgBookingWebhook);
   // Each organisation's WhatsApp provider: receipts, replies (JSON from Meta
   // and WhatsApp Web, form posts from Twilio) and Meta's GET verification.
   app.get('/api/v1/webhooks/whatsapp/:orgId', whatsappWebhook);

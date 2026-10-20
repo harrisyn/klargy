@@ -11,13 +11,13 @@ import {
 } from '../services/connectLookup.service';
 
 // Klargy Connect v1, phase 4 (docs/connect/v1.md section 7): staff asking
-// the connected EMR who a patient is. The EMR runs the cover check; Klargy
+// the connected EMR who a patient is. The system runs the cover check; Klargy
 // only shows the answer.
 
 const MAX_IDENTIFIER = 100;
 
 const notConfigured = (res: Response) =>
-  res.status(409).json({ error: 'No EMR connection is set up to look patients up.', code: 'LOOKUP_NOT_CONFIGURED' });
+  res.status(409).json({ error: 'No system connection is set up to look people up.', code: 'LOOKUP_NOT_CONFIGURED' });
 
 function fail(error: unknown, res: Response, next: NextFunction) {
   if (error instanceof LookupError) return res.status(error.status).json({ error: error.message, code: error.code });
@@ -33,7 +33,7 @@ async function callerOrg(req: Request, res: Response): Promise<string | null> {
   return caller.organizationId;
 }
 
-/** POST /connect-lookup {identifierType, identifier, locationId?}: the EMR's
+/** POST /connect-lookup {identifierType, identifier, locationId?}: the system's
  * staff answer, as it sent it (fields the contract defines only). */
 export const postLookup = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -62,8 +62,8 @@ export const postLookup = async (req: Request, res: Response, next: NextFunction
 };
 
 /**
- * GET /connect-lookup/entries/:entryId: the EMR's record for the patient on
- * this ticket, looked up by the EMR's own patient id. 404 NO_PATIENT_REF
+ * GET /connect-lookup/entries/:entryId: the system's record for the patient on
+ * this ticket, looked up by the system's own patient id. 404 NO_PATIENT_REF
  * when the patient didn't come from a connected EMR (the desk then shows no
  * card).
  */
@@ -91,7 +91,7 @@ export const getEntryLookup = async (req: Request, res: Response, next: NextFunc
     }
     if (!found) {
       if (refs.length > 0 && !(await lookupIntegrationFor(organizationId))) return notConfigured(res);
-      return res.status(404).json({ error: 'This patient isn’t linked to an EMR record.', code: 'NO_PATIENT_REF' });
+      return res.status(404).json({ error: 'This person isn’t linked to a system record.', code: 'NO_PATIENT_REF' });
     }
 
     const result = await lookupPatient(found.integration, {

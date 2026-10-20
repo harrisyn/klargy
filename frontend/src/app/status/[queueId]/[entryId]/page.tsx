@@ -25,7 +25,7 @@ interface QueueStatus {
   sentTo?: SentTo | null;
   /** The visit so far, oldest first. */
   journey?: JourneyStop[];
-  /** Today's queue: PAUSED while staff (or the EMR) have paused it. */
+  /** Today's queue: PAUSED while staff (or the system) have paused it. */
   queueStatus?: 'ACTIVE' | 'PAUSED' | 'CLOSED';
   currentlyServing: string | null;
   totalInQueue: number;

@@ -8,7 +8,7 @@ export default function PrivacyPage() {
   return (
     <LegalPage title="Privacy Policy" updated="26 September 2026">
       <p>
-        {APP_NAME} runs queues and appointments for the organizations that use it (clinics, offices and other service
+        {APP_NAME} runs queues and appointments for the organizations that use it (clinics, restaurants, salons, offices and other service
         providers). This page explains what information is handled and why.
       </p>
 
@@ -21,7 +21,7 @@ export default function PrivacyPage() {
 
       <h2>What we collect</h2>
       <ul>
-        <li><strong>Patients and customers:</strong> the name, phone number, email and any identifiers (for example a medical record number) the organization asks for, plus your tickets, queue positions, and appointment times.</li>
+        <li><strong>Customers and visitors:</strong> the name, phone number, email and any identifiers (for example a member or record number) the organization asks for, plus your tickets, queue positions, and appointment times.</li>
         <li><strong>Staff accounts:</strong> name, work email, phone, role, and a securely hashed password.</li>
         <li><strong>Usage records:</strong> an audit log of queue actions (who called, served, transferred or cancelled a ticket, and when), and basic technical logs needed to run and secure the service.</li>
       </ul>
@@ -30,7 +30,7 @@ export default function PrivacyPage() {
       <ul>
         <li>To place you in the right queue, show your position, and tell you when it is your turn (on screen, and by email or SMS if the organization turns that on).</li>
         <li>To let staff manage queues and appointments, and to produce wait-time and throughput reports for the organization.</li>
-        <li>To send your visit details to the organization&apos;s own systems (such as their patient records system) where they have connected one.</li>
+        <li>To send your visit details to the organization&apos;s own systems (such as their records system) where they have connected one.</li>
       </ul>
       <p>We do not sell personal information or use it for advertising.</p>
 

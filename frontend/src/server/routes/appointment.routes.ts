@@ -9,6 +9,7 @@ import {
   checkInAppointment,
   getAvailableSlots,
   searchPatients,
+  setAppointmentTables,
 } from '../controllers/appointment.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { scope, user, service, slot, appointment, location } from '../middleware/tenantScope.middleware';
@@ -33,6 +34,7 @@ router.get('/:id', scope(appointment('params.id')), getAppointment);
 // Appointment operations
 router.patch('/:id/reschedule', scope(appointment('params.id'), slot('body.newSlotId')), rescheduleAppointment);
 router.patch('/:id/cancel', scope(appointment('params.id')), cancelAppointment);
+router.put('/:id/tables', scope(appointment('params.id')), setAppointmentTables);
 router.post('/:id/check-in', scope(appointment('params.id')), checkInAppointment);
 
 export default router;

@@ -30,6 +30,16 @@ type Result = Awaited<ReturnType<typeof api.quickStart>>;
 export default function WelcomePage() {
   const { user, refreshUser } = useAuthContext();
   const [industry, setIndustry] = useState<string>(user?.organization?.industry || '');
+  const [currencies, setCurrencies] = useState<string[]>([]);
+  const [currency, setCurrency] = useState<string>(user?.organization?.currency || '');
+  useEffect(() => {
+    api.getPublicCurrencies()
+      .then(({ base, currencies: list }) => {
+        setCurrencies(list);
+        setCurrency((cur) => (cur && list.includes(cur) ? cur : base));
+      })
+      .catch(() => {});
+  }, []);
   const terms = termsFor({ industry: industry || user?.organization?.industry, customerLabel: user?.organization?.customerLabel });
   const SUGGESTED = SUGGESTED_BY_INDUSTRY[industry || 'OTHER'] || SUGGESTED_BY_INDUSTRY.OTHER;
   const { limits, loading: planLoading } = useSubscription();
@@ -98,6 +108,7 @@ export default function WelcomePage() {
         activeDays: [...days].sort().join(','),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         industry: industry || undefined,
+        currency: currency || undefined,
       }));
       refreshUser().catch(() => {});
     } catch (err) {
@@ -174,10 +185,20 @@ export default function WelcomePage() {
           </div>
         </section>
 
+        {currencies.length > 1 && (
+          <section>
+            <h2>Which currency do you charge in?</h2>
+            <p className="welcome-help">For your plan, your wallet and any bookings customers pay for. Fixed once money has moved.</p>
+            <select id="currency" value={currency} onChange={(e) => setCurrency(e.target.value)} aria-label="Currency">
+              {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </section>
+        )}
+
         <section>
           <h2>Where do {terms.people} come?</h2>
           <label htmlFor="loc" className="field-label">Location name</label>
-          <input id="loc" value={locationName} onChange={(e) => setLocationName(e.target.value)} placeholder="e.g. Main clinic" required />
+          <input id="loc" value={locationName} onChange={(e) => setLocationName(e.target.value)} placeholder="e.g. Main branch" required />
         </section>
 
         <section>

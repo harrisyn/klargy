@@ -1,7 +1,7 @@
 # klargy-connect (Python)
 
-Python SDK for **Klargy Connect v1**, the API an EMR (or any system that sends
-people into a queue) uses to work with Klargy. The contract is
+Python SDK for **Klargy Connect v1**, the API a CRM, point-of-sale, reservations system, EMR (or any system
+that sends people into a queue) uses to work with Klargy. The contract is
 [`docs/connect/v1.md`](../../../docs/connect/v1.md); this package covers all of it:
 
 - `KlargyConnect` (async, httpx) and `KlargyConnectSync`: one method per endpoint,

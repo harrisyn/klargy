@@ -30,7 +30,7 @@ import { extractSubdomain } from '@/lib/subdomain';
 /**
  * The desk on its own: for the pop-out window in browsers without
  * Picture-in-Picture, for embedding in other apps (see /embed/desk.js), for
- * installing as a small app from the browser menu, and inside an EMR through
+ * installing as a small app from the browser menu, and inside a system through
  * Klargy Connect (opened with ?launch=<code>, docs/connect/v1.md section 6).
  * `?layout=bar` lays it out as one compact bar for a host's floating
  * toolbar; the bar reports the height it needs with klargy:resize.
@@ -74,18 +74,18 @@ const parentWindow = () => (typeof window !== 'undefined' && window.parent !== w
 
 function WidgetDesk({ launch, layout, onSignedOut }: { launch: DeskLaunch | null; layout: DeskLayout; onSignedOut: () => void }) {
   const { logout, isStaff } = useAuthContext();
-  // The kinds of room the EMR offers here: from the URL (`roomTypes=`), then
+  // The kinds of room the system offers here: from the URL (`roomTypes=`), then
   // from klargy:room-types whenever the practitioner moves to another area.
   const [roomTypes, setRoomTypes] = useState<RoomType[]>(() => (typeof window !== 'undefined' ? roomTypesFrom(window.location.search) : []));
 
   const post = useCallback((message: DeskMessage) => postToHost(parentWindow(), launch, message), [launch]);
 
-  // Klargy Connect: pass the entry, with the EMR's ids, to the EMR.
+  // Klargy Connect: pass the entry, with the system's ids, to the system.
   const onEntryEvent = useCallback((kind: DeskEntryEvent, entryId: string) => {
     if (!launch) return;
     api.getLaunchEntry(launch.launchId, entryId)
       .then(({ entry }) => post({ type: kind === 'called' ? 'klargy:entry-called' : 'klargy:entry-updated', entry }))
-      .catch(() => { /* the EMR also gets the webhook */ });
+      .catch(() => { /* the system also gets the webhook */ });
   }, [launch, post]);
 
   const desk = useDesk({ onEntryEvent });
@@ -145,7 +145,7 @@ function WidgetDesk({ launch, layout, onSignedOut }: { launch: DeskLaunch | null
     if (launch) onSignedOut();
   }, [launch, logout, onSignedOut, post]);
 
-  // The EMR signs the practitioner out of the desk with them.
+  // The system signs the practitioner out of the desk with them.
   useEffect(() => {
     if (!launch) return;
     const onMessage = (e: MessageEvent) => {
@@ -248,7 +248,7 @@ export default function WidgetDeskPage() {
   } else if (isAuthenticated) {
     body = <WidgetDesk launch={launch} layout={layout} onSignedOut={onSignedOut} />;
   } else if (launch) {
-    // Opened from an EMR, and the session has ended: only the EMR can sign
+    // Opened from a system, and the session has ended: only the system can sign
     // this person in again.
     body = <div className="widget-msg"><p>Your desk session has ended. Open the desk again from your records system.</p></div>;
   } else {

@@ -56,7 +56,7 @@ export const authenticateIntegration = async (req: Request, res: Response, next:
 
     const features = await getOrganizationFeatures(integration.organizationId);
     if (!features.emrIntegration) {
-      return res.status(403).json({ error: 'Your plan does not include EMR connections', feature: 'emrIntegration' });
+      return res.status(403).json({ error: 'Your plan does not include connected systems', feature: 'emrIntegration' });
     }
 
     if (!integration.lastUsedAt || Date.now() - integration.lastUsedAt.getTime() > LAST_USED_RESOLUTION_MS) {

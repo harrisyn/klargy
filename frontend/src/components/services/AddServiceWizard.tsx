@@ -115,6 +115,14 @@ export const AddServiceWizard: React.FC<AddServiceWizardProps> = ({ organization
                   </select>
                 </div>
               </div>
+              <div className="form-group">
+                <label>How customers get in</label>
+                <select value={data.bookingMode} onChange={e => update('bookingMode', e.target.value as WizardData['bookingMode'])}>
+                  <option value="WALK_IN">Walk-in only: customers join the line now</option>
+                  <option value="APPOINTMENT">Appointments only: customers book a time, then check in</option>
+                  <option value="BOTH">Both: join now or book a time</option>
+                </select>
+              </div>
               <div className="form-group checkbox-group">
                 <label>
                   <input type="checkbox" checked={data.requiresName} onChange={e => update('requiresName', e.target.checked)} />

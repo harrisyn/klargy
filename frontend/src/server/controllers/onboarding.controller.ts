@@ -1,3 +1,4 @@
+import { currencyChangeBlock, isSupportedCurrency } from '../services/currency.service';
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import { loadCaller } from '../middleware/tenantScope.middleware';
@@ -104,6 +105,18 @@ export const quickStart = async (req: Request, res: Response, next: NextFunction
 
     const industry = INDUSTRIES.some((i) => i.id === req.body?.industry) ? String(req.body.industry) : null;
     if (industry) await prisma.organization.update({ where: { id: organizationId }, data: { industry } });
+
+    // Currency for prices, the wallet and booking payments; settable until money moves in it.
+    const wantedCurrency = typeof req.body?.currency === 'string' ? req.body.currency.trim().toUpperCase() : '';
+    if (wantedCurrency) {
+      const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { currency: true } });
+      if (org && org.currency !== wantedCurrency) {
+        if (!(await isSupportedCurrency(wantedCurrency))) return res.status(400).json({ error: `${wantedCurrency} isn’t a supported currency` });
+        const block = await currencyChangeBlock(organizationId);
+        if (block) return res.status(409).json({ error: block });
+        await prisma.organization.update({ where: { id: organizationId }, data: { currency: wantedCurrency } });
+      }
+    }
 
     const publicCode = await uniquePublicCode(locationName);
     const location = await prisma.location.create({

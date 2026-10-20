@@ -10,7 +10,7 @@ export interface User {
   role: UserRole;
   organizationId?: string;
   isActive: boolean;
-  organization?: { id: string; name: string; industry?: string | null; customerLabel?: string | null; customerLabelPlural?: string | null } | null;
+  organization?: { id: string; name: string; industry?: string | null; customerLabel?: string | null; customerLabelPlural?: string | null; currency?: string } | null;
 }
 
 export interface AuthResponse {
@@ -28,6 +28,8 @@ export interface Organization {
   industry?: string | null;
   customerLabel?: string | null;
   customerLabelPlural?: string | null;
+  /** Currency for the organization's plan, wallet and booking prices. */
+  currency?: string;
 }
 
 export interface Location {
@@ -82,6 +84,20 @@ export interface Service {
   allowAnonymous?: boolean;
   /** Payment gate: joiners wait "awaiting payment" until cleared. */
   requiresClearance?: boolean;
+  /** Public page: join the line now, book a time, or both. */
+  bookingMode?: 'WALK_IN' | 'APPOINTMENT' | 'BOTH';
+  bookingUnit?: 'BOOKING' | 'PERSON';
+  minPartySize?: number;
+  maxPartySize?: number;
+  recurringSlots?: boolean;
+  price?: string | number | null;
+  priceBasis?: 'BOOKING' | 'PERSON';
+  paymentMode?: 'NONE' | 'DEPOSIT' | 'FULL';
+  depositPercent?: number;
+  refundCutoffHours?: number;
+  refundTiers?: { hours: number; percent: number }[] | null;
+  tableMode?: 'NONE' | 'AUTO';
+  roomId?: string | null;
   displayMode?: string;
   location?: Location;
   practitioners?: Practitioner[];

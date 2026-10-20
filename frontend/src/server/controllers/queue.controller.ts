@@ -871,6 +871,11 @@ export const publicJoinQueueWithSession = async (req: Request, res: Response, ne
       });
     }
 
+    // Appointment-only services are entered by booking, then checking in.
+    if (service.bookingMode === 'APPOINTMENT') {
+      return res.status(403).json({ error: 'APPOINTMENT_ONLY', message: 'This service is by appointment only. Please book a time.' });
+    }
+
     // Today's queue for this service, in the location's own day
     const { queue } = (await getOrCreateQueueForDate(serviceId))!;
 

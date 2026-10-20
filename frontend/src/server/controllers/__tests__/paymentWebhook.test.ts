@@ -3,9 +3,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../lib/prisma', () => ({
   default: {
     organizationAddOn: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn() },
-    organizationSubscription: { findFirst: vi.fn() },
+    organizationSubscription: { findFirst: vi.fn(), update: vi.fn() },
     organization: { findUnique: vi.fn() },
   },
+}));
+
+// Booking payments arrive on the same endpoint; these tests are about plan billing.
+vi.mock('../bookingWebhook.controller', () => ({ tryPlatformBookingEvent: vi.fn(async () => 'not-booking') }));
+vi.mock('../../services/wallet.service', () => ({
+  creditProviderPayment: vi.fn(async () => true),
+  enrollFromWallet: vi.fn(async () => ({ ok: true })),
+  settleOrganizationSubscription: vi.fn(async () => true),
 }));
 
 vi.mock('../../services/payments', () => ({
@@ -20,6 +28,7 @@ vi.mock('../../services/payments/idempotency', () => ({
 import prisma from '../../lib/prisma';
 import { getProvider } from '../../services/payments';
 import { handleStripeWebhook } from '../paymentWebhook.controller';
+import { creditProviderPayment, enrollFromWallet, settleOrganizationSubscription } from '../../services/wallet.service';
 
 function makeRes() {
   const res: any = {};
@@ -167,5 +176,56 @@ describe('paymentWebhook - add-on dispatch', () => {
       where: { externalProviderSubscriptionId: 'sub_plan_1' },
       include: { organizations: true },
     });
+  });
+});
+
+describe('paymentWebhook - plan payments go through the wallet', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const planEvent = (over: any = {}) => ({
+    eventId: 'evt_p1',
+    type: 'checkout_completed',
+    organizationId: 'org1',
+    externalSubscriptionId: 'sub_ext',
+    currentPeriodEnd: null,
+    planId: 'pro',
+    billingCycle: 'monthly',
+    kind: 'plan',
+    amount: 50,
+    currency: 'USD',
+    ...over,
+  });
+
+  beforeEach(() => {
+    (prisma.organization.findUnique as any).mockResolvedValue({ id: 'org1', subscriptionId: 'sub1', subscription: { id: 'sub1', currentPeriodEnd: new Date(0) } });
+  });
+
+  it('credits the payment to the wallet, then buys the plan from it', async () => {
+    (getProvider as any).mockResolvedValue({ verifyWebhookSignature: () => planEvent() });
+    await handleStripeWebhook(makeReq(), makeRes());
+    expect(creditProviderPayment).toHaveBeenCalledWith({ organizationId: 'org1', amount: 50, currency: 'USD', provider: 'stripe', eventId: 'evt_p1' });
+    expect(enrollFromWallet).toHaveBeenCalledWith('org1', 'pro', 'monthly');
+    expect(prisma.organizationSubscription.update).toHaveBeenCalledWith({
+      where: { id: 'sub1' },
+      data: { provider: 'stripe', externalProviderSubscriptionId: 'sub_ext' },
+    });
+  });
+
+  it('does not enrol again when the same checkout event is retried', async () => {
+    (creditProviderPayment as any).mockResolvedValueOnce(false);
+    (getProvider as any).mockResolvedValue({ verifyWebhookSignature: () => planEvent() });
+    await handleStripeWebhook(makeReq(), makeRes());
+    expect(enrollFromWallet).not.toHaveBeenCalled();
+  });
+
+  it('credits a renewal payment and settles the subscription from the wallet', async () => {
+    (getProvider as any).mockResolvedValue({
+      verifyWebhookSignature: () => planEvent({ eventId: 'evt_r1', type: 'renewal_succeeded', planId: null, billingCycle: null, organizationId: null }),
+    });
+    (prisma.organizationSubscription.findFirst as any).mockResolvedValue({ organizations: [{ id: 'org1' }] });
+    await handleStripeWebhook(makeReq(), makeRes());
+    expect(creditProviderPayment).toHaveBeenCalledWith(expect.objectContaining({ amount: 50, eventId: 'evt_r1' }));
+    expect(settleOrganizationSubscription).toHaveBeenCalledWith('org1', expect.any(Date));
+    expect(enrollFromWallet).not.toHaveBeenCalled();
   });
 });

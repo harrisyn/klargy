@@ -27,8 +27,11 @@ import {
   type LucideIcon,
   Building2,
   LayoutGrid,
+  Banknote,
+  Coins,
 } from 'lucide-react';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { industryFeatures } from '@/lib/terms';
 import { useTerms } from '@/hooks/useTerms';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { buildAdminUrl } from '@/lib/subdomain';
@@ -100,6 +103,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       { href: '/superadmin/organizations', label: 'Organizations', icon: Building2, show: isSuperAdmin },
       { href: '/superadmin/plans', label: 'Plans', icon: CreditCard, show: isSuperAdmin },
       { href: '/superadmin/platform-services', label: 'Platform services', icon: LayoutGrid, show: isSuperAdmin },
+      { href: '/superadmin/payouts', label: 'Payouts', icon: Banknote, show: isSuperAdmin },
+      { href: '/superadmin/currencies', label: 'Currencies', icon: Coins, show: isSuperAdmin },
     ],
   };
   const groups: { label: string; items: NavItem[] }[] = (platformOnly ? [platformGroup] : [
@@ -124,6 +129,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         { href: '/admin/locations', label: 'Locations', icon: MapPin, show: isAdmin },
         { href: '/services', label: 'Services', icon: Stethoscope, show: isAdmin },
         { href: '/admin/service-points', label: 'Desks & rooms', icon: DoorOpen, show: isAdmin },
+        { href: '/admin/rooms', label: industryFeatures(user?.organization?.industry).tables ? 'Rooms & floor plans' : 'Rooms', icon: LayoutGrid, show: isAdmin && industryFeatures(user?.organization?.industry).rooms },
         { href: '/admin/flow-designer', label: `${terms.Person} flow`, icon: Workflow, show: isAdmin },
         { href: '/admin/qr', label: 'QR codes', icon: QrCode, show: isAdmin },
         { href: '/admin/displays', label: 'Display screens', icon: MonitorPlay, show: isAdmin },
@@ -137,6 +143,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         { href: '/admin/integrations', label: 'Integrations', icon: Plug, show: isOrgAdmin },
         { href: '/admin/settings', label: 'Settings', icon: Settings, show: isAdmin },
         { href: '/admin/billing', label: 'Billing', icon: CreditCard, show: isAdmin },
+        { href: '/admin/payments', label: 'Payments', icon: Banknote, show: isOrgAdmin },
       ],
     },
     {

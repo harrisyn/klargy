@@ -3,6 +3,7 @@ import prisma from '../lib/prisma';
 import { getProvider, ProviderNotActiveError } from '../services/payments';
 import { ProviderName } from '../services/payments/types';
 import { returnBaseUrl } from '../lib/cors';
+import { planForCurrency } from '../services/currency.service';
 
 export const createCheckoutSession = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -45,8 +46,10 @@ export const createCheckoutSession = async (req: Request, res: Response, next: N
 
     const cycle: 'monthly' | 'quarterly' | 'yearly' =
       billingCycle === 'yearly' ? 'yearly' : billingCycle === 'quarterly' ? 'quarterly' : 'monthly';
-    const amount = cycle === 'yearly' ? Number(plan.priceYearly) : cycle === 'quarterly' ? Number(plan.priceQuarterly) : Number(plan.priceMonthly);
-    const org = await prisma.organization.findUnique({ where: { id: user.organizationId }, select: { slug: true } });
+    const org = await prisma.organization.findUnique({ where: { id: user.organizationId }, select: { slug: true, currency: true } });
+    // Charged in the organization's own currency.
+    const priced = await planForCurrency(plan, org?.currency);
+    const amount = cycle === 'yearly' ? Number(priced.priceYearly) : cycle === 'quarterly' ? Number(priced.priceQuarterly) : Number(priced.priceMonthly);
     const frontendUrl = await returnBaseUrl(req.headers?.origin, org?.slug);
 
     let redirectUrl: string;
@@ -57,7 +60,7 @@ export const createCheckoutSession = async (req: Request, res: Response, next: N
         planCode: plan.code,
         planName: plan.name,
         amount,
-        currency: plan.currency,
+        currency: priced.currency,
         billingCycle: cycle,
         successUrl: `${frontendUrl}/admin/billing?checkout=success`,
         cancelUrl: `${frontendUrl}/admin/billing?checkout=cancelled`,

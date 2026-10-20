@@ -1,0 +1,26 @@
+.frame { width: 100%; border-radius: 14px; border: 1.5px solid var(--gray-200, #e2e6e3); overflow: hidden; background: white; }
+.svg { display: block; width: 100%; height: auto; touch-action: manipulation; }
+.floor { fill: #f4f7f6; }
+
+.shape { stroke-width: 3; }
+.name { font: 700 18px var(--font-sans, system-ui); pointer-events: none; }
+.seatsText { font: 500 13px var(--font-sans, system-ui); pointer-events: none; }
+
+.free .shape { fill: white; stroke: var(--brand, #0f9fa4); }
+.free .name, .free .seatsText { fill: #0d2a47; }
+.selected .shape { fill: var(--brand, #0f9fa4); stroke: var(--brand, #0f9fa4); }
+.selected .name, .selected .seatsText { fill: white; }
+.taken .shape { fill: #e3e7ea; stroke: #aab3ba; }
+.taken .name, .taken .seatsText { fill: #6b7a86; }
+.unavailable .shape { fill: #f7f8f7; stroke: #cdd4d0; stroke-dasharray: 8 6; }
+.unavailable .name, .unavailable .seatsText { fill: #97a3ad; }
+.pickable { cursor: pointer; }
+.pickable:hover .shape, .pickable:focus-visible .shape { stroke-width: 5; outline: none; }
+
+.legend { list-style: none; display: flex; flex-wrap: wrap; gap: 14px; margin: 8px 2px 0; padding: 0; font-size: 0.8125rem; color: var(--gray-600, #4f5d69); }
+.legend li { display: inline-flex; align-items: center; gap: 6px; }
+.legend span { width: 14px; height: 14px; border-radius: 4px; border: 2px solid; display: inline-block; }
+.swFree { background: white; border-color: var(--brand, #0f9fa4); }
+.swSelected { background: var(--brand, #0f9fa4); border-color: var(--brand, #0f9fa4); }
+.swTaken { background: #e3e7ea; border-color: #aab3ba; }
+.swUnavailable { background: #f7f8f7; border-color: #cdd4d0; border-style: dashed; }

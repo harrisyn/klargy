@@ -10,6 +10,9 @@ import { Badge, Button, EmptyState, Input, Modal, PageHeader, Select, Textarea }
 import type { BadgeTone } from '@/components/ui';
 import { apiErrorMessage } from '@/components/auth/AuthShell';
 import { confirmDialog } from '@/lib/dialog';
+import SeatMap, { SeatMapLegend } from '@/components/rooms/SeatMap';
+import { industryFeatures } from '@/lib/terms';
+import type { FloorMap } from '@/api/client';
 
 interface LocationOption { id: string; name: string }
 interface ServiceOption { id: string; name: string; locationId: string; isActive: boolean }
@@ -22,6 +25,7 @@ const todayISO = () => {
 const formatTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const STATUS: Record<Appointment['status'], { label: string; tone: BadgeTone }> = {
+  PENDING_PAYMENT: { label: 'Awaiting payment', tone: 'warning' },
   SCHEDULED: { label: 'Scheduled', tone: 'primary' },
   CONFIRMED: { label: 'Confirmed', tone: 'primary' },
   CHECKED_IN: { label: 'Checked in', tone: 'success' },
@@ -129,7 +133,7 @@ function BookAppointmentModal({ open, onClose, onBooked, locations, services, de
     e.preventDefault();
     setError('');
     if (!slotId) return setError('Pick a time.');
-    if (!isNew && !patient) return setError('Find the patient, or add them as a new patient.');
+    if (!isNew && !patient) return setError(`Find the ${terms.person}, or add them as a new ${terms.person}.`);
     if (isNew && (!newPatient.firstName.trim() || !newPatient.lastName.trim())) return setError(`Enter the ${terms.person}’s first and last name.`);
     setSaving(true);
     try {
@@ -306,6 +310,8 @@ export default function AppointmentsPage() {
   const [booking, setBooking] = useState(false);
   const [rescheduling, setRescheduling] = useState<Appointment | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [moving, setMoving] = useState<Appointment | null>(null);
+  const features = industryFeatures(user?.organization?.industry);
 
   useEffect(() => {
     if (!user?.organizationId) return;
@@ -424,13 +430,23 @@ export default function AppointmentsPage() {
                   <tr key={a.id}>
                     <td className="cell-strong" style={{ whiteSpace: 'nowrap' }}>{formatTime(a.startTime)}</td>
                     <td>
-                      <div className="cell-strong">{a.user.firstName} {a.user.lastName}</div>
+                      <div className="cell-strong">{a.user.firstName} {a.user.lastName}{(a.partySize ?? 1) > 1 ? ` · ${a.partySize} people` : ''}</div>
                       {a.user.phone && <div className="muted">{a.user.phone}</div>}
                       {a.notes && <div className="muted" style={{ fontSize: '0.8125rem' }}>{a.notes}</div>}
                     </td>
                     <td>{a.service.name}</td>
                     <td>
-                      <Badge tone={STATUS[a.status]?.tone ?? 'neutral'}>{STATUS[a.status]?.label ?? a.status}</Badge>
+                      <Badge tone={STATUS[a.status]?.tone ?? 'neutral'}>{STATUS[a.status]?.label ?? a.status}</Badge>{a.source === 'ONLINE' && <Badge tone="neutral">Booked online</Badge>}
+                      {a.paymentStatus && a.paymentStatus !== 'NONE' && a.amount != null && (
+                        <div className="muted" style={{ fontSize: '0.75rem', marginTop: 4 }}>
+                          {a.paymentStatus === 'PAID' || a.paymentStatus === 'PARTIAL_REFUND' ? `Paid ${Number(a.amountPaid ?? 0).toFixed(2)} of ${Number(a.amount).toFixed(2)} ${a.currency ?? ''}` : a.paymentStatus === 'REFUNDED' ? 'Refunded' : a.paymentStatus === 'PENDING' ? 'Payment pending' : `Payment ${a.paymentStatus.toLowerCase()}`}
+                        </div>
+                      )}
+                      {a.tables && a.tables.length > 0 && (
+                        <div className="muted" style={{ fontSize: '0.75rem', marginTop: 4 }}>
+                          {a.room ? `${a.room.name}: ` : ''}{a.tables.map((t) => t.table.name).join(', ')}
+                        </div>
+                      )}
                       {a.rescheduledAt && <div className="muted" style={{ fontSize: '0.75rem', marginTop: 4 }}>Rescheduled</div>}
                     </td>
                     <td className="cell-actions">
@@ -438,6 +454,9 @@ export default function AppointmentsPage() {
                         <>
                           {isToday && (
                             <Button size="sm" onClick={() => checkIn(a)} disabled={busyId === a.id}>Check in</Button>
+                          )}
+                          {features.tables && a.room && (
+                            <Button size="sm" variant="secondary" onClick={() => setMoving(a)} disabled={busyId === a.id}>{`Change ${features.tableLabel}`}</Button>
                           )}
                           <Button size="sm" variant="secondary" onClick={() => setRescheduling(a)} disabled={busyId === a.id}>Reschedule</Button>
                           <Button size="sm" variant="ghost" onClick={() => cancel(a)} disabled={busyId === a.id}>Cancel</Button>
@@ -451,6 +470,15 @@ export default function AppointmentsPage() {
           </div>
         )}
       </div>
+
+      {moving && (
+        <ChangeTablesModal
+          appointment={moving}
+          label={features.tableLabel}
+          onClose={() => setMoving(null)}
+          onSaved={() => { setMoving(null); setNotice({ tone: 'success', text: 'Table changed.' }); load(); }}
+        />
+      )}
 
       <BookAppointmentModal
         open={booking}
@@ -474,5 +502,71 @@ export default function AppointmentsPage() {
         }}
       />
     </Layout>
+  );
+}
+
+/** Move a booking to other tables or seats, picking them on the room's floor plan. */
+function ChangeTablesModal({ appointment, label, onClose, onSaved }: { appointment: Appointment; label: string; onClose: () => void; onSaved: () => void }) {
+  const [map, setMap] = useState<FloorMap | null>(null);
+  const [chosen, setChosen] = useState<string[]>(appointment.tables?.map((t) => t.table.id) ?? []);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const party = appointment.partySize ?? 1;
+
+  useEffect(() => {
+    if (!appointment.room) return;
+    api.getRoomSeatMap(appointment.room.id, { start: appointment.startTime, partySize: party, excludeAppointmentId: appointment.id })
+      .then(setMap)
+      .catch((e) => setError(apiErrorMessage(e, 'Couldn’t load the floor plan.')));
+  }, [appointment, party]);
+
+  const seats = map ? map.tables.filter((t) => chosen.includes(t.id)).reduce((n, t) => n + t.seats, 0) : 0;
+
+  const save = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      try {
+        await api.setAppointmentTables(appointment.id, chosen);
+      } catch (err) {
+        // A room with a different rate changes the price: say so and let the host decide.
+        const change = (err as { response?: { status?: number; data?: { priceChange?: { from: number; to: number; paid: number; refund: number; balance: number } } } }).response;
+        if (change?.status !== 409 || !change.data?.priceChange) throw err;
+        const c = change.data.priceChange;
+        const cur = appointment.currency ?? '';
+        const effect = c.refund > 0 ? `${c.refund.toFixed(2)} ${cur} of what they paid will be refunded.` : c.balance > 0 ? `They will owe ${c.balance.toFixed(2)} ${cur} more, to be settled at the venue.` : '';
+        const ok = await confirmDialog({ title: 'This changes the price', message: `That room takes the booking from ${c.from.toFixed(2)} to ${c.to.toFixed(2)} ${cur}. ${effect}`.trim(), confirmLabel: 'Move and reprice', cancelLabel: 'Keep it where it is' });
+        if (!ok) { setSaving(false); return; }
+        await api.setAppointmentTables(appointment.id, chosen, true);
+      }
+      onSaved();
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Couldn’t move them.'));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`${appointment.user.firstName} ${appointment.user.lastName}: ${label}`}
+      maxWidth="960px"
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save} disabled={saving || chosen.length === 0 || seats < party}>{saving ? 'Saving…' : 'Move here'}</Button></>}
+    >
+      {error && <p role="alert" style={{ color: 'var(--danger, #a3371f)' }}>{error}</p>}
+      {map ? (
+        <>
+          <SeatMap
+            layout={{ width: map.room.layoutWidth, height: map.room.layoutHeight, imageUrl: map.room.layoutImageUrl }}
+            tables={map.tables}
+            selectedIds={chosen}
+            onToggle={(id) => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]))}
+          />
+          <SeatMapLegend picking />
+          <p className="muted">A party of {party}: you have chosen {seats} {seats === 1 ? 'seat' : 'seats'}{seats < party ? ' (choose more)' : ''}.</p>
+        </>
+      ) : <div className="spinner" />}
+    </Modal>
   );
 }

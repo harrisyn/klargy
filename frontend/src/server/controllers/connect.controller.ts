@@ -7,7 +7,7 @@ import { WEBHOOK_EVENTS } from '../services/webhooks.service';
 import { ADMIN_MAPPABLE_TYPES, CONNECT_REF_TYPES } from '../services/externalRefs.service';
 import { syncLookupDataSource } from '../services/connectLookup.service';
 
-// Klargy Connect v1 (docs/connect/v1.md): the API another system (an EMR)
+// Klargy Connect v1 (docs/connect/v1.md): the API another system (a CRM, point-of-sale, reservations or records system)
 // calls with its integration API key. Every handler here runs after
 // authenticateIntegration, so req.integration is set.
 
@@ -166,7 +166,7 @@ export const registerIntegration = async (req: Request, res: Response, next: Nex
     });
     if (!integration) return res.status(401).json({ error: 'A valid integration API key is required' });
 
-    const description = `${systemName || integration.name} (EMR connection)`;
+    const description = `${systemName || integration.name} (system connection)`;
     let secret: string;
     let endpointId: string;
     if (integration.webhookEndpoint) {

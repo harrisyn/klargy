@@ -1,0 +1,60 @@
+/* Day strip and time grid for booking; the rest reuses the join page's look. */
+
+.picker { display: flex; flex-direction: column; gap: 14px; }
+.days { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity; }
+.day, .dayOn {
+  flex: none;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 68px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 1.5px solid var(--gray-200, #e2e6e3);
+  background: white;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.day span, .dayOn span { font-size: 0.75rem; color: var(--gray-500, #6b7a86); }
+.day strong, .dayOn strong { font-size: 0.9375rem; }
+.dayOn { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 10%, white); }
+.dayOn span { color: var(--brand); }
+
+.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.slot, .slotOn {
+  min-height: 48px;
+  border-radius: 12px;
+  border: 1.5px solid var(--gray-200, #e2e6e3);
+  background: white;
+  color: inherit;
+  font: 600 1rem var(--font-sans);
+  cursor: pointer;
+}
+.slot:hover { border-color: var(--brand); }
+.slotOn { border-color: var(--brand); background: var(--brand); color: white; }
+.slotLabel { display: block; font: 500 0.75rem var(--font-sans); opacity: 0.8; }
+.party { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--gray-50, #f7f8f7); font-weight: 600; }
+.stepper { display: inline-flex; align-items: center; gap: 14px; }
+.stepper button { width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid var(--gray-300, #cdd4d0); background: white; color: inherit; display: grid; place-items: center; cursor: pointer; }
+.stepper button:disabled { opacity: 0.4; cursor: default; }
+.stepper output { min-width: 28px; text-align: center; font: 700 1.375rem var(--font-sans); }
+.note { margin: 0; color: var(--gray-500, #6b7a86); font-size: 0.9375rem; }
+
+.areas { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.areas legend { font-weight: 600; margin-bottom: 6px; padding: 0; }
+.area, .areaOn { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 12px; border: 1.5px solid var(--gray-200, #e2e6e3); background: white; cursor: pointer; }
+.areaOn { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, white); }
+.area input, .areaOn input { flex: none; width: 18px; height: 18px; padding: 0; margin: 2px 0 0; box-shadow: none; accent-color: var(--brand); }
+.area span, .areaOn span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.area small, .areaOn small { color: var(--gray-600, #4f5d69); font-size: 0.8125rem; }
+.area .rate, .areaOn .rate { color: var(--brand); font-weight: 600; }
+.seatChoice { display: grid; gap: 10px; padding: 12px; border-radius: 14px; background: var(--gray-50, #f7f8f7); }
+.summary { padding: 14px; border-radius: 14px; background: var(--gray-50, #f7f8f7); display: flex; flex-direction: column; gap: 2px; }
+.summary strong { font-size: 1.125rem; }
+.summary span { color: var(--gray-600, #4f5d69); font-size: 0.9375rem; }
+
+.actions { display: flex; flex-direction: column; gap: 10px; }
+.danger { border-color: #e7b5a8; color: #a3371f; }

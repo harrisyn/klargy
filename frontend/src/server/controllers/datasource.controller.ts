@@ -12,10 +12,10 @@ import {
   lookupPatient,
 } from '../services/connectLookup.service';
 
-// INTEGRATION sources belong to an EMR connection (Klargy Connect): it
+// INTEGRATION sources belong to a system connection (Klargy Connect): it
 // creates, updates and switches them off, never this API.
 const MANAGED_TYPE = 'INTEGRATION';
-const managedRefusal = { error: 'Connected-system lookups are set up by the EMR connection, not here.' };
+const managedRefusal = { error: 'Connected-system lookups are set up by the system connection, not here.' };
 
 // Get all data sources for an organization
 export const getDataSources = async (req: Request, res: Response, next: NextFunction) => {
@@ -187,7 +187,7 @@ export const testDataSource = async (req: Request, res: Response, next: NextFunc
         const integration = await lookupIntegrationFor(dataSource.organizationId, integrationIdOf(config));
         testResult = integration
           ? { success: true, message: `Lookups go to ${integration.name}.` }
-          : { success: false, message: 'The EMR connection is switched off or has no lookup address.' };
+          : { success: false, message: 'The system connection is switched off or has no lookup address.' };
         break;
       }
       default:
@@ -388,12 +388,12 @@ export const fetchFromDataSource = async (req: Request, res: Response, next: Nex
     } else if (dataSource.type === 'INTEGRATION') {
       const integration = await lookupIntegrationFor(dataSource.organizationId, integrationIdOf(config));
       if (!integration) {
-        return res.status(409).json({ error: 'The EMR connection is switched off or has no lookup address.', code: 'LOOKUP_NOT_CONFIGURED' });
+        return res.status(409).json({ error: 'The system connection is switched off or has no lookup address.', code: 'LOOKUP_NOT_CONFIGURED' });
       }
       if (!LOOKUP_IDENTIFIER_TYPES.includes(identifierType)) {
         return res.status(400).json({ error: `identifierType must be one of: ${LOOKUP_IDENTIFIER_TYPES.join(', ')}` });
       }
-      // The EMR's own id beats a phone number, which several people can share.
+      // The system's own id beats a phone number, which several people can share.
       const patientRef =
         typeof userId === 'string' && userId
           ? (await prisma.externalReference.findFirst({

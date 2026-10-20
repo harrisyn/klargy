@@ -773,7 +773,7 @@ paths:
           schema: { type: string, maxLength: 200 }
       responses:
         '200':
-          description: The room, or `servicePoint: null`.
+          description: 'The room, or `servicePoint: null`.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StaffDeskResponse' }
@@ -801,6 +801,9 @@ paths:
         `appointment.created`, `appointment.rescheduled` (start time or
         service changed) or `appointment.cancelled`. An appointment Klargy has
         already checked in stays checked in while the EMR says `booked`.
+        `tables` (and `room`) seat the booking on Klargy's tables; see the
+        guide's "Tables and seats". A refused seating creates and changes
+        nothing.
       parameters:
         - name: appointmentRef
           in: path
@@ -831,8 +834,93 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`TABLE_UNAVAILABLE`: the tables asked for (or, with `"auto"`, any table) can''t take the booking at that time, or a booking''s existing tables can''t take its new time. Nothing was changed.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: '`PATIENT_REQUIRED`.'
+          description: '`PATIENT_REQUIRED`, or `TABLES_NOT_AVAILABLE` (this kind of business has no tables).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /rooms:
+    get:
+      tags: [Journey]
+      operationId: listRooms
+      summary: Rooms, tables and floor plans
+      description: |
+        Scope `catalog:read`. The organisation's rooms with their rules, rates
+        and floor plans, so a reservations or point-of-sale system can seat
+        people on the same tables Klargy does. `tables` is empty (and
+        `tablesAvailable` false) for kinds of business without tables.
+      parameters:
+        - name: location
+          in: query
+          required: false
+          description: EMR or Klargy location id.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Rooms.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`LOCATION_NOT_MAPPED`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /rooms/{room}/availability:
+    get:
+      tags: [Journey]
+      operationId: getRoomAvailability
+      summary: Which tables are free
+      description: |
+        Scope `catalog:read`. Each of the room's tables marked `free`,
+        `taken` (a booking holds it then) or `unavailable` (the room's rules,
+        such as its hours or party limits, don't allow this booking), for a
+        booking of `partySize` from `start` to `end`. A table can be taken
+        between this answer and your `PUT /appointments`, which then answers
+        409 `TABLE_UNAVAILABLE`.
+      parameters:
+        - name: room
+          in: path
+          required: true
+          description: Klargy room id from `GET /rooms`.
+          schema: { type: string }
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - name: end
+          in: query
+          required: false
+          description: Defaults to an hour and a half after `start`.
+          schema: { type: string, format: date-time }
+        - name: partySize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 1 }
+      responses:
+        '200':
+          description: The room's tables and their state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomAvailability' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`ROOM_NOT_FOUND`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`TABLES_NOT_AVAILABLE`.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1330,6 +1418,9 @@ components:
             - STAFF_INACTIVE
             - STAFF_NOT_MAPPED
             - LOCATION_NOT_MAPPED
+            - TABLE_UNAVAILABLE
+            - TABLES_NOT_AVAILABLE
+            - ROOM_NOT_FOUND
         limitType: { type: string, description: 'LIMIT_REACHED' }
         current: { type: integer, description: 'LIMIT_REACHED' }
         limit: { type: [integer, 'null'], description: 'LIMIT_REACHED' }
@@ -1868,6 +1959,14 @@ components:
         startTime: { type: string, format: date-time }
         endTime: { type: [string, 'null'], format: date-time }
         status: { type: string }
+        partySize: { type: integer, description: People in the booking. }
+        payment:
+          type: object
+          description: Present when the booking has a price or the connected system sent one.
+          properties:
+            total: { type: [number, 'null'] }
+            paid: { type: [number, 'null'] }
+            currency: { type: [string, 'null'] }
         fromStartTime: { type: string, format: date-time }
         slotStart: { type: string, format: date-time }
         fromSlotStart: { type: string, format: date-time }
@@ -2003,6 +2102,33 @@ components:
           default: booked
         staff: { type: [string, 'null'], description: 'Accepted, not used yet.' }
         notes: { type: [string, 'null'], maxLength: 1000 }
+        partySize:
+          type: integer
+          minimum: 1
+          maximum: 500
+          description: People in the booking (a table's covers, tickets). Defaults to 1.
+        payment:
+          type: [object, 'null']
+          description: What the connected system knows about money for this booking, so Klargy can show it. Klargy does not charge anything for these.
+          properties:
+            total: { type: [number, 'null'], minimum: 0 }
+            paid: { type: [number, 'null'], minimum: 0 }
+            currency: { type: [string, 'null'], description: 'Three-letter code, e.g. GHS.' }
+        tables:
+          description: |
+            Seat the booking on Klargy's tables. `"auto"`: the smallest free table
+            that fits `partySize`, else the nearest free tables in one room.
+            A list of table ids (up to 12, one room): exactly these. `null` or
+            `[]`: let go of its tables. Omitted: a new booking holds none, an
+            existing one keeps its tables and they are checked again if its
+            time, length or party changes.
+          oneOf:
+            - { type: string, enum: [auto] }
+            - { type: array, maxItems: 12, items: { type: string } }
+            - { type: 'null' }
+        room:
+          type: [string, 'null']
+          description: A Klargy room id from `GET /rooms`. With `tables` omitted or `"auto"`, limits the search to that room.
 
     AppointmentResponse:
       type: object
@@ -2017,6 +2143,28 @@ components:
             startTime: { type: string, format: date-time }
             endTime: { type: [string, 'null'], format: date-time }
             service: { $ref: '#/components/schemas/NamedRef' }
+            partySize: { type: integer, description: People in the booking. }
+            room:
+              description: The room it is in, when it holds tables.
+              oneOf:
+                - $ref: '#/components/schemas/NamedRef'
+                - { type: 'null' }
+            tables:
+              type: array
+              description: The tables or seats it holds.
+              items:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  seats: { type: integer }
+            payment:
+              type: object
+              properties:
+                status: { type: string, description: '`unpaid`, `pending`, `paid` or `refunded`.' }
+                total: { type: [number, 'null'] }
+                paid: { type: [number, 'null'] }
+                currency: { type: [string, 'null'] }
             refs:
               type: object
               properties:
@@ -2024,6 +2172,97 @@ components:
                 patient: { type: [string, 'null'] }
                 service: { type: [string, 'null'] }
                 location: { type: [string, 'null'] }
+
+    FloorTable:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        seats: { type: integer }
+        x: { type: [number, 'null'], description: Centre of the table on the plan. }
+        y: { type: [number, 'null'] }
+        width: { type: number }
+        height: { type: number }
+        rotation: { type: number, description: Degrees, clockwise. }
+        shape: { type: string, enum: [RECT, ROUND] }
+
+    RoomsResponse:
+      type: object
+      required: [tablesAvailable, rooms]
+      properties:
+        tablesAvailable: { type: boolean }
+        rooms:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              description: { type: [string, 'null'] }
+              active: { type: boolean }
+              location: { $ref: '#/components/schemas/NamedRef' }
+              onlineBookable: { type: boolean, description: False for a staff-only room. }
+              partySize:
+                type: object
+                properties:
+                  min: { type: [integer, 'null'] }
+                  max: { type: [integer, 'null'] }
+              hours:
+                type: object
+                properties:
+                  open: { type: [string, 'null'], description: '"18:00"' }
+                  close: { type: [string, 'null'] }
+                  days:
+                    type: [array, 'null']
+                    description: 0 (Sunday) to 6; null means the service's days.
+                    items: { type: integer }
+              allowCombine: { type: boolean, description: Several free tables may be given to one big party. }
+              rate:
+                type: object
+                properties:
+                  mode: { type: string, enum: [INHERIT, OVERRIDE, SURCHARGE] }
+                  price: { type: [number, 'null'] }
+                  basis: { type: string, enum: [BOOKING, PERSON] }
+              plan:
+                type: object
+                properties:
+                  width: { type: integer }
+                  height: { type: integer }
+                  imageUrl: { type: [string, 'null'] }
+              tables:
+                type: array
+                items:
+                  allOf:
+                    - $ref: '#/components/schemas/FloorTable'
+                    - type: object
+                      properties:
+                        active: { type: boolean }
+
+    RoomAvailability:
+      type: object
+      properties:
+        room:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            plan:
+              type: object
+              properties:
+                width: { type: integer }
+                height: { type: integer }
+                imageUrl: { type: [string, 'null'] }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        partySize: { type: integer }
+        tables:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/FloorTable'
+              - type: object
+                properties:
+                  status: { type: string, enum: [free, taken, unavailable] }
 
     AnalyticsCounters:
       type: object

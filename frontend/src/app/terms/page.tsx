@@ -14,14 +14,14 @@ export default function TermsPage() {
 
       <h2>Using the service</h2>
       <ul>
-        <li>Organizations are responsible for the accounts they create, for the information they ask patients and customers to provide, and for having a lawful basis to collect it.</li>
+        <li>Organizations are responsible for the accounts they create, for the information they ask their customers to provide, and for having a lawful basis to collect it.</li>
         <li>Staff must keep their sign-in details private and only access their own organization&apos;s data.</li>
         <li>Don&apos;t misuse the service: no attempts to access other organizations&apos; data, overload the system, or use it to send unsolicited messages.</li>
       </ul>
 
       <h2>Queue times are estimates</h2>
       <p>
-        Positions and wait times shown to patients are estimates based on current activity. The organization you are
+        Positions and wait times shown to customers are estimates based on current activity. The organization you are
         visiting decides the actual order in which people are seen, including emergencies and priority cases.
       </p>
 
@@ -33,7 +33,7 @@ export default function TermsPage() {
 
       <h2>Integrations and AI</h2>
       <p>
-        Organizations that connect outside systems (such as a patient records system) or turn on AI-assisted analytics
+        Organizations that connect outside systems (such as a records system) or turn on AI-assisted analytics
         are responsible for their configuration and for how they use the results. AI output is guidance and should be
         checked before acting on it.
       </p>

@@ -4,7 +4,7 @@ import { authenticateIntegration, requireScope } from '../middleware/integration
 import { getMe, registerIntegration, putCatalog, getCatalog, getMappings } from '../controllers/connect.controller';
 import { putPatient, postEntry, postEntryByRef, getEntryByRef, listEntries, postServingLink } from '../controllers/connectQueue.controller';
 import { launchDesk, getStaffDesk } from '../controllers/connectDesk.controller';
-import { putAppointment, getAnalytics, postServiceStatus } from '../controllers/connectJourney.controller';
+import { putAppointment, getAnalytics, postServiceStatus, listRooms, getRoomAvailability } from '../controllers/connectJourney.controller';
 
 // Klargy Connect v1 (docs/connect/v1.md): called by other systems with an
 // integration API key, never by staff with a JWT.
@@ -17,6 +17,9 @@ router.put('/integration', requireScope('integration:write'), registerIntegratio
 router.put('/catalog', requireScope('catalog:write'), putCatalog);
 router.get('/catalog', requireScope('catalog:read'), getCatalog);
 router.get('/mappings', requireScope('catalog:read'), getMappings);
+// Rooms, tables and floor plans, and which tables are free for a time.
+router.get('/rooms', requireScope('catalog:read'), listRooms);
+router.get('/rooms/:room/availability', requireScope('catalog:read'), getRoomAvailability);
 
 router.put('/patients/:patientId', requireScope('patients:write'), putPatient);
 router.get('/entries', requireScope('entries:read'), listEntries);

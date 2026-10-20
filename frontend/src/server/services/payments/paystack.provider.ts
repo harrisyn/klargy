@@ -147,6 +147,8 @@ export class PaystackProvider implements PaymentProvider {
           planId: metadata?.planId ?? null,
           billingCycle: billingCycle === 'monthly' || billingCycle === 'quarterly' || billingCycle === 'yearly' ? billingCycle : null,
           kind: 'plan',
+          amount: typeof event.data?.amount === 'number' ? event.data.amount / 100 : null,
+          currency: event.data?.currency ? String(event.data.currency).toUpperCase() : null,
         };
       }
       case 'invoice.payment_failed':

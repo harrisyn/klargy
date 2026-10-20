@@ -66,8 +66,19 @@ export interface PatientSummary {
 
 export interface Appointment {
   id: string;
-  status: 'SCHEDULED' | 'CONFIRMED' | 'CHECKED_IN' | 'CANCELLED' | 'NO_SHOW' | 'COMPLETED';
+  status: 'PENDING_PAYMENT' | 'SCHEDULED' | 'CONFIRMED' | 'CHECKED_IN' | 'CANCELLED' | 'NO_SHOW' | 'COMPLETED';
   notes: string | null;
+  /** People in the booking. */
+  partySize?: number;
+  /** The tables or seats it holds, and the room it is in. */
+  tables?: { table: { id: string; name: string; seats: number; area: string | null } }[];
+  room?: { id: string; name: string } | null;
+  amount?: string | number | null;
+  amountPaid?: string | number | null;
+  currency?: string | null;
+  paymentStatus?: 'NONE' | 'PENDING' | 'PAID' | 'PARTIAL_REFUND' | 'REFUNDED' | 'EXPIRED' | 'FAILED';
+  /** STAFF (booked at the desk) or ONLINE (booked by the customer). */
+  source?: 'STAFF' | 'ONLINE';
   rescheduledAt: string | null;
   serviceId: string;
   startTime: string;
@@ -238,6 +249,128 @@ export interface CustomDomainInfo {
   verifiedAt: string | null;
   createdAt: string;
   cnameTarget: string;
+}
+
+export interface WalletSummary {
+  balance: number;
+  currency: string;
+  walletManaged: boolean;
+  nextCharge: { amount: number; date: string } | null;
+  override: { until: string; planName: string; endBehavior: string | null; customPrice: number | null } | null;
+  entries: { id: string; amount: number; currency: string; kind: string; reason: string; createdAt: string }[];
+}
+
+export interface FlowTemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+  industries: string[];
+  services: { name: string; description: string; requiresClearance: boolean; bookingMode: 'WALK_IN' | 'APPOINTMENT' | 'BOTH'; slotDuration: number; partySize: { min: number; max: number } | null; tables: boolean }[];
+  flows: Record<string, string[]>;
+  defaultService: string;
+  /** Rooms the template lays out, with their floor plans (only for kinds of business that use tables). */
+  rooms: { name: string; description: string; layoutWidth: number; layoutHeight: number; tables: { name: string; seats: number; x: number; y: number; width: number; height: number; shape: 'RECT' | 'ROUND'; rotation: number }[] }[];
+}
+
+export interface CurrencySettings {
+  base: string;
+  rates: Record<string, number>;
+  refreshedAt: string | null;
+  autoRefresh: boolean;
+  usage: Record<string, { organizations: number; plans: number }>;
+  missingRates: string[];
+}
+
+export interface RoomRow {
+  id: string;
+  locationId: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  onlineBookable: boolean;
+  allowCombine: boolean;
+  minPartySize: number | null;
+  maxPartySize: number | null;
+  openTime: string | null;
+  closeTime: string | null;
+  activeDays: string | null;
+  priceMode: 'INHERIT' | 'OVERRIDE' | 'SURCHARGE';
+  price: number | null;
+  priceBasis: 'BOOKING' | 'PERSON';
+  paymentMode: 'NONE' | 'DEPOSIT' | 'FULL' | null;
+  depositPercent: number | null;
+  refundCutoffHours: number | null;
+  refundTiers: { hours: number; percent: number }[] | null;
+  layoutWidth: number;
+  layoutHeight: number;
+  layoutImageUrl: string | null;
+}
+
+export interface RoomTableRow {
+  id: string;
+  name: string;
+  seats: number;
+  x: number | null;
+  y: number | null;
+  width: number;
+  height: number;
+  rotation: number;
+  shape: string;
+  isActive: boolean;
+}
+
+export interface FloorMap {
+  room: { id: string; name: string; layoutWidth: number; layoutHeight: number; layoutImageUrl: string | null };
+  tables: (Omit<RoomTableRow, 'isActive'> & { status: 'free' | 'taken' | 'unavailable' })[];
+  at?: string;
+  bookings?: { tableId: string; appointmentId: string; startTime: string; endTime: string; partySize: number; status: string; name: string }[];
+}
+
+export interface PayoutBalance {
+  currency: string;
+  pending: number;
+  available: number;
+  inReview: number;
+  paidOut: number;
+}
+
+export interface PaymentsOverview {
+  currency: string;
+  supportedCurrencies: string[];
+  collectedBy: 'ORG' | 'PLATFORM' | 'NONE';
+  collectorProvider: string | null;
+  platformCollects: boolean;
+  canUseOwnKeys: boolean;
+  ownProviders: { provider: 'stripe' | 'paystack'; isActive: boolean; publicKey: string | null; secretKey: string; hasWebhookSecret: boolean; webhookUrl: string }[];
+  webhookUrls: Record<string, string>;
+  payoutDetails: string;
+  payout: { holdDays: number; feePercent: number; minPayout: number; balance: PayoutBalance };
+  requests: { id: string; amount: number; currency: string; status: 'REQUESTED' | 'PAID' | 'REJECTED'; note: string | null; requestedAt: string; reviewedAt: string | null }[];
+  ledger: { id: string; amount: number; currency: string; kind: string; reason: string; availableAt: string; createdAt: string }[];
+}
+
+export interface PayoutRequestRow {
+  id: string;
+  organization: { id: string; name: string; slug: string | null };
+  amount: number;
+  currency: string;
+  status: 'REQUESTED' | 'PAID' | 'REJECTED';
+  details: string;
+  note: string | null;
+  requestedAt: string;
+  reviewedAt: string | null;
+  orgBalance: PayoutBalance;
+}
+
+export interface ServiceSession {
+  id: string;
+  startTime: string;
+  endTime: string;
+  capacity: number;
+  booked: number;
+  label: string | null;
+  price: number | null;
 }
 
 class ApiClient {
@@ -564,6 +697,17 @@ class ApiClient {
   async switchToFreePlan(planId: string) {
     const { data } = await this.client.post(`/tenant/subscription/switch/${planId}`);
     return data as { success: boolean; planId: string; planName: string };
+  }
+
+  // Wallet
+  async getMyWallet() {
+    const { data } = await this.client.get('/tenant/wallet');
+    return data as WalletSummary;
+  }
+
+  async payPlanFromWallet(payload: { planId: string; billingCycle: 'monthly' | 'quarterly' | 'yearly' }) {
+    const { data } = await this.client.post('/tenant/wallet/checkout', payload);
+    return data as WalletSummary & { planName: string; charged: number };
   }
 
   // Add-ons
@@ -1133,12 +1277,168 @@ class ApiClient {
     return data;
   }
 
-  async getFlowTemplates(): Promise<{ id: string; name: string; description: string; services: { name: string; requiresClearance: boolean }[]; flows: Record<string, string[]>; defaultService: string }[]> {
+  async getPublicCurrencies(): Promise<{ base: string; currencies: string[] }> {
+    const { data } = await this.client.get('/public/currencies');
+    return data;
+  }
+
+  async getCurrencySettings(): Promise<CurrencySettings> {
+    const { data } = await this.client.get('/superadmin/currencies');
+    return data;
+  }
+
+  async updateCurrencySettings(rates: Record<string, number>, autoRefresh?: boolean) {
+    const { data } = await this.client.put('/superadmin/currencies', { rates, ...(autoRefresh === undefined ? {} : { autoRefresh }) });
+    return data as { base: string; rates: Record<string, number> };
+  }
+
+  async refreshCurrencyRates() {
+    const { data } = await this.client.post('/superadmin/currencies/refresh');
+    return data as { updated: string[]; unavailable: string[]; base: string; rates: Record<string, number>; refreshedAt: string };
+  }
+
+  async setOrganizationCurrency(organizationId: string, currency: string) {
+    const { data } = await this.client.patch(`/superadmin/organizations/${organizationId}/currency`, { currency });
+    return data as { currency: string };
+  }
+
+  // Rooms, tables and floor plans
+  async listRooms(locationId: string): Promise<{ features: { rooms: boolean; tables: boolean }; rooms: (RoomRow & { seats: number; _count: { tables: number; instances: number; services: number } })[] }> {
+    const { data } = await this.client.get('/rooms', { params: { locationId } });
+    return data;
+  }
+
+  async getRoom(id: string): Promise<{ room: RoomRow; tables: RoomTableRow[]; deskIds: string[] }> {
+    const { data } = await this.client.get(`/rooms/${id}`);
+    return data;
+  }
+
+  async createRoom(body: Partial<RoomRow> & { locationId: string; name: string }): Promise<RoomRow> {
+    const { data } = await this.client.post('/rooms', body);
+    return data;
+  }
+
+  async updateRoom(id: string, body: Partial<RoomRow>): Promise<RoomRow> {
+    const { data } = await this.client.put(`/rooms/${id}`, body);
+    return data;
+  }
+
+  async deleteRoom(id: string) {
+    const { data } = await this.client.delete(`/rooms/${id}`);
+    return data;
+  }
+
+  async saveRoomLayout(id: string, body: { layoutWidth: number; layoutHeight: number; tables: unknown[] }): Promise<{ tables: RoomTableRow[]; layoutWidth: number; layoutHeight: number }> {
+    const { data } = await this.client.put(`/rooms/${id}/layout`, body);
+    return data;
+  }
+
+  async uploadRoomImage(id: string, file: File): Promise<{ layoutImageUrl: string }> {
+    const form = new FormData();
+    form.append('image', file);
+    const { data } = await this.client.post(`/rooms/${id}/image`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+    return data;
+  }
+
+  async removeRoomImage(id: string) {
+    const { data } = await this.client.delete(`/rooms/${id}/image`);
+    return data;
+  }
+
+  async listDesks(locationId: string): Promise<{ id: string; name: string; serviceName: string; roomId: string | null }[]> {
+    const { data } = await this.client.get('/rooms/desks', { params: { locationId } });
+    return data;
+  }
+
+  async setRoomDesks(id: string, instanceIds: string[]) {
+    const { data } = await this.client.put(`/rooms/${id}/desks`, { instanceIds });
+    return data;
+  }
+
+  async getRoomFloor(id: string, at: string, minutes = 90): Promise<FloorMap> {
+    const { data } = await this.client.get(`/rooms/${id}/floor`, { params: { at, minutes } });
+    return data;
+  }
+
+  async getRoomSeatMap(id: string, params: { start: string; minutes?: number; partySize?: number; excludeAppointmentId?: string }): Promise<FloorMap> {
+    const { data } = await this.client.get(`/rooms/${id}/seat-map`, { params });
+    return data;
+  }
+
+  async setAppointmentTables(appointmentId: string, tableIds: string[], confirmPrice = false) {
+    const { data } = await this.client.put(`/appointments/${appointmentId}/tables`, { tableIds, ...(confirmPrice ? { confirmPrice } : {}) });
+    return data;
+  }
+
+  // Booking payments (organization admin)
+  async getPaymentsOverview(): Promise<PaymentsOverview> {
+    const { data } = await this.client.get('/payments');
+    return data;
+  }
+
+  async updatePaymentSettings(body: { currency?: string; payoutDetails?: string }) {
+    const { data } = await this.client.put('/payments/settings', body);
+    return data;
+  }
+
+  async saveOwnPaymentProvider(provider: 'stripe' | 'paystack', body: { publicKey?: string; secretKey?: string; webhookSecret?: string; isActive?: boolean }) {
+    const { data } = await this.client.put(`/payments/providers/${provider}`, body);
+    return data;
+  }
+
+  async removeOwnPaymentProvider(provider: 'stripe' | 'paystack') {
+    const { data } = await this.client.delete(`/payments/providers/${provider}`);
+    return data;
+  }
+
+  async requestPayout(amount?: number) {
+    const { data } = await this.client.post('/payments/payouts', { amount });
+    return data as { id: string; amount: number; currency: string; status: string };
+  }
+
+  // Payouts (superadmin)
+  async getPayoutSettings(): Promise<{ holdDays: number; feePercent: number; minPayout: number }> {
+    const { data } = await this.client.get('/superadmin/payout-settings');
+    return data;
+  }
+
+  async updatePayoutSettings(body: { holdDays: number; feePercent: number; minPayout: number }) {
+    const { data } = await this.client.put('/superadmin/payout-settings', body);
+    return data as { holdDays: number; feePercent: number; minPayout: number };
+  }
+
+  async listPayoutRequests(status?: string): Promise<PayoutRequestRow[]> {
+    const { data } = await this.client.get('/superadmin/payouts', { params: status ? { status } : {} });
+    return data;
+  }
+
+  async decidePayout(id: string, action: 'PAID' | 'REJECTED', note?: string) {
+    const { data } = await this.client.post(`/superadmin/payouts/${id}/decision`, { action, note });
+    return data;
+  }
+
+  // One-off sessions (events, classes, tickets)
+  async getServiceSessions(serviceId: string): Promise<ServiceSession[]> {
+    const { data } = await this.client.get(`/services/${serviceId}/sessions`);
+    return data;
+  }
+
+  async createServiceSession(serviceId: string, body: { date: string; startTime: string; durationMinutes?: number; capacity: number; price?: number | null; label?: string }): Promise<ServiceSession> {
+    const { data } = await this.client.post(`/services/${serviceId}/sessions`, body);
+    return data;
+  }
+
+  async deleteServiceSession(serviceId: string, slotId: string) {
+    const { data } = await this.client.delete(`/services/${serviceId}/sessions/${slotId}`);
+    return data;
+  }
+
+  async getFlowTemplates(): Promise<FlowTemplateInfo[]> {
     const { data } = await this.client.get('/service-flows/templates');
     return data;
   }
 
-  async applyFlowTemplate(templateId: string, locationId: string): Promise<{ services: { id: string; name: string; created: boolean }[]; servicePointsCreated: number; flowsCreated: number; defaultServiceId: string }> {
+  async applyFlowTemplate(templateId: string, locationId: string): Promise<{ services: { id: string; name: string; created: boolean }[]; servicePointsCreated: number; flowsCreated: number; defaultServiceId: string; roomsCreated: number; tablesCreated: number; tablesSkipped: boolean }> {
     const { data } = await this.client.post(`/service-flows/templates/${templateId}/apply`, { locationId });
     return data;
   }
@@ -1288,6 +1588,7 @@ class ApiClient {
     adminPassword: string;
     emailVerified?: boolean;
     slug?: string;
+    currency?: string;
   }) {
     const { data } = await this.client.post('/public/register-org', payload);
     return data;
@@ -1313,7 +1614,7 @@ class ApiClient {
     return data;
   }
 
-  async quickStart(payload: { locationName: string; services: string[]; startTime: string; endTime: string; activeDays: string; timezone?: string; industry?: string }): Promise<{ location: { id: string; name: string; publicCode: string }; services: { id: string; name: string; desk: string }[] }> {
+  async quickStart(payload: { locationName: string; services: string[]; startTime: string; endTime: string; activeDays: string; timezone?: string; industry?: string; currency?: string }): Promise<{ location: { id: string; name: string; publicCode: string }; services: { id: string; name: string; desk: string }[] }> {
     const { data } = await this.client.post('/onboarding/quick-start', payload);
     return data;
   }
@@ -1575,6 +1876,7 @@ class ApiClient {
     upgradePlanId?: string | null;
     creditAllowances?: Partial<Record<'AI' | 'EMAIL' | 'SMS', number | null>>;
     addOnPricingOverrides?: Partial<Record<'LOCATIONS' | 'USERS', { pricePerUnitMonthly: number; pricePerUnitOneOff: number } | null>>;
+    currencyPrices?: { currency: string; priceMonthly: number; priceQuarterly: number; priceYearly: number }[];
   }) {
     const { data } = await this.client.post('/superadmin/plans', payload);
     return data;
@@ -1602,6 +1904,7 @@ class ApiClient {
     upgradePlanId?: string | null;
     creditAllowances?: Partial<Record<'AI' | 'EMAIL' | 'SMS', number | null>>;
     addOnPricingOverrides?: Partial<Record<'LOCATIONS' | 'USERS', { pricePerUnitMonthly: number; pricePerUnitOneOff: number } | null>>;
+    currencyPrices?: { currency: string; priceMonthly: number; priceQuarterly: number; priceYearly: number }[];
   }) {
     const { data } = await this.client.patch(`/superadmin/plans/${id}`, payload);
     return data;
@@ -1610,6 +1913,32 @@ class ApiClient {
   async grantCredits(organizationId: string, payload: { creditType: 'AI' | 'EMAIL' | 'SMS'; amount: number; reason: string }) {
     const { data } = await this.client.post(`/superadmin/organizations/${organizationId}/credits/grant`, payload);
     return data;
+  }
+
+  async getOrganizationWallet(organizationId: string) {
+    const { data } = await this.client.get(`/superadmin/organizations/${organizationId}/wallet`);
+    return data as WalletSummary;
+  }
+
+  async adjustOrganizationWallet(organizationId: string, payload: { amount: number; reason: string; currency?: string }) {
+    const { data } = await this.client.post(`/superadmin/organizations/${organizationId}/wallet/adjust`, payload);
+    return data as WalletSummary & { subscriptionUpdated: boolean };
+  }
+
+  async bumpOrganizationPlan(organizationId: string, payload: {
+    planId: string;
+    until: string;
+    endBehavior: 'REVERT' | 'KEEP_AT_CUSTOM_PRICE';
+    customPrice?: number | null;
+    billingCycle?: string;
+  }) {
+    const { data } = await this.client.post(`/superadmin/organizations/${organizationId}/subscription/bump`, payload);
+    return data as WalletSummary;
+  }
+
+  async endOrganizationPlanBump(organizationId: string) {
+    const { data } = await this.client.post(`/superadmin/organizations/${organizationId}/subscription/bump/end`);
+    return data as WalletSummary;
   }
 
   async deleteSubscriptionPlan(id: string) {

@@ -1,0 +1,34 @@
+.designer { display: grid; gap: 12px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.spacer { flex: 1; }
+.body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+.canvasWrap { min-width: 0; }
+.canvas { display: block; width: 100%; height: auto; max-height: 70vh; border: 1.5px solid var(--gray-300, #cdd4d0); border-radius: 12px; background: white; touch-action: none; user-select: none; }
+.hint { margin: 6px 2px 0; font-size: 0.8125rem; color: var(--gray-600, #4f5d69); }
+
+.table { cursor: grab; }
+.table:active { cursor: grabbing; }
+.table > rect, .table > ellipse { fill: white; stroke: #0f9fa4; stroke-width: 3; }
+.table.on > rect, .table.on > ellipse { fill: #e6f6f6; stroke: #0a565a; stroke-width: 5; }
+.table.bad > rect, .table.bad > ellipse { stroke: #c0392b; }
+.table.off > rect, .table.off > ellipse { fill: #f0f0f0; stroke: #aab3ba; stroke-dasharray: 8 6; }
+.tname { font: 700 16px var(--font-sans, system-ui); fill: #0d2a47; }
+.tseats { font: 500 12px var(--font-sans, system-ui); fill: #4f5d69; }
+
+.panel { display: grid; gap: 16px; }
+.fields { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--gray-200, #e2e6e3); border-radius: 12px; background: white; }
+.fields h4 { margin: 0; font-size: 0.9375rem; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.small { margin: 0; font-size: 0.8125rem; color: var(--gray-600, #4f5d69); }
+.empty { margin: 0; padding: 12px; font-size: 0.875rem; color: var(--gray-600, #4f5d69); border: 1px dashed var(--gray-300, #cdd4d0); border-radius: 12px; }
+
+@media (max-width: 900px) { .body { grid-template-columns: 1fr; } }
+
+.divider { width: 1px; height: 20px; background: var(--gray-200, #e2e6e3); margin: 0 2px; }
+.zoom { min-width: 40px; text-align: center; font-size: 0.8125rem; color: var(--gray-600, #4f5d69); }
+.scroller { overflow: auto; border-radius: 12px; }
+.handle { fill: white; stroke: #0a565a; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.rotateHandle { fill: #0f9fa4; stroke: white; stroke-width: 2; cursor: grab; vector-effect: non-scaling-stroke; }
+.stem { stroke: #0a565a; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.marquee { fill: rgba(15, 159, 164, 0.12); stroke: #0f9fa4; stroke-width: 1.5; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }

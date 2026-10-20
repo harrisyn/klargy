@@ -142,6 +142,8 @@ export class StripeProvider implements PaymentProvider {
           planId: session.metadata?.planId ?? null,
           billingCycle: billingCycle === 'monthly' || billingCycle === 'quarterly' || billingCycle === 'yearly' ? billingCycle : null,
           kind: 'plan',
+          amount: session.payment_status === 'paid' && session.amount_total ? session.amount_total / 100 : null,
+          currency: session.currency ? session.currency.toUpperCase() : null,
         };
       }
       case 'invoice.payment_succeeded': {
@@ -163,6 +165,9 @@ export class StripeProvider implements PaymentProvider {
           // Stripe doesn't reliably surface the originating checkout's
           // metadata on every subsequent invoice/subscription event.
           kind: 'plan',
+          // The first invoice of a subscription is the checkout payment, already credited
+          amount: invoice.billing_reason === 'subscription_create' ? null : invoice.amount_paid / 100,
+          currency: invoice.currency ? invoice.currency.toUpperCase() : null,
         };
       }
       case 'invoice.payment_failed': {

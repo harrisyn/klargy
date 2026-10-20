@@ -17,6 +17,40 @@ export const INDUSTRIES = [
 
 export type IndustryId = (typeof INDUSTRIES)[number]['id'];
 
+/**
+ * Advanced features that only make sense for some kinds of business. They are
+ * offered according to the organization's industry, so a clinic never sees
+ * tables or floor plans and a restaurant does. Rooms (grouping desks, with
+ * their own rules and rates) suit every industry. `OTHER` (and an unset
+ * industry) gets everything, since we can't guess.
+ */
+export interface IndustryFeatures {
+  /** Rooms within a location, each with its own rules and rates. */
+  rooms: boolean;
+  /** Named tables/chairs/seats that bookings are given, placed on a floor plan. */
+  tables: boolean;
+  /** What the bookable thing is called. */
+  tableLabel: string;
+  tablesLabel: string;
+  roomLabel: string;
+  roomsLabel: string;
+}
+
+const FEATURES: Record<string, IndustryFeatures> = {
+  RESTAURANT: { rooms: true, tables: true, tableLabel: 'table', tablesLabel: 'tables', roomLabel: 'room', roomsLabel: 'rooms' },
+  SALON: { rooms: true, tables: true, tableLabel: 'chair', tablesLabel: 'chairs', roomLabel: 'room', roomsLabel: 'rooms' },
+  EDUCATION: { rooms: true, tables: true, tableLabel: 'seat', tablesLabel: 'seats', roomLabel: 'room', roomsLabel: 'rooms' },
+  OTHER: { rooms: true, tables: true, tableLabel: 'table', tablesLabel: 'tables', roomLabel: 'room', roomsLabel: 'rooms' },
+};
+// Everyone else can group desks and set rules and rates per room (consulting rooms, meeting rooms),
+// but has no use for tables and seat maps.
+const ROOMS_ONLY: IndustryFeatures = { rooms: true, tables: false, tableLabel: 'table', tablesLabel: 'tables', roomLabel: 'room', roomsLabel: 'rooms' };
+
+export function industryFeatures(industry?: string | null): IndustryFeatures {
+  if (!industry) return FEATURES.OTHER;
+  return FEATURES[industry] ?? ROOMS_ONLY;
+}
+
 export interface TermSource {
   industry?: string | null;
   customerLabel?: string | null;

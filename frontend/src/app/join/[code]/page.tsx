@@ -6,7 +6,8 @@ import { useSearchParams } from 'next/navigation';
 import { APP_NAME } from '@/lib/appConfig';
 
 import { API_BASE } from '@/lib/apiBase';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarClock, Footprints } from 'lucide-react';
+import BookingFlow from '@/components/booking/BookingFlow';
 import { termsFor } from '@/lib/terms';
 import styles from './join.module.css';
 
@@ -32,6 +33,7 @@ interface LocationInfo {
     industry?: string | null;
     customerLabel?: string | null;
     customerLabelPlural?: string | null;
+    currency?: string;
   };
   /** Set when the organisation checks an MR or member number with its EMR before issuing a ticket. */
   joinIdentifier?: { type: 'mrNumber' | 'memberNumber'; label: string } | null;
@@ -45,6 +47,16 @@ interface LocationInfo {
     slotDuration: number;
     startTime: string;
     endTime: string;
+    /** WALK_IN (default), APPOINTMENT or BOTH. */
+    bookingMode?: 'WALK_IN' | 'APPOINTMENT' | 'BOTH';
+    bookingUnit?: 'BOOKING' | 'PERSON';
+    tableMode?: 'NONE' | 'AUTO';
+    minPartySize?: number;
+    maxPartySize?: number;
+    price?: string | number | null;
+    priceBasis?: 'BOOKING' | 'PERSON';
+    paymentMode?: 'NONE' | 'DEPOSIT' | 'FULL';
+    depositPercent?: number;
   }[];
 }
 
@@ -76,9 +88,16 @@ const SESSION_KEY_PREFIX = 'qms_session_';
 /** Where someone starts without choosing: the only service, or the
  * location's first point of contact. */
 function firstStop(loc: LocationInfo): string | null {
-  if (loc.services.length === 1) return loc.services[0].id;
-  return loc.defaultServiceId && loc.services.some((s) => s.id === loc.defaultServiceId) ? loc.defaultServiceId : null;
+  const joinable = loc.services.filter(canJoinNow);
+  if (joinable.length === 1) return joinable[0].id;
+  return loc.defaultServiceId && joinable.some((s) => s.id === loc.defaultServiceId) ? loc.defaultServiceId : null;
 }
+
+type ServiceInfo = LocationInfo['services'][number];
+/** Customers can join the line now (anything but appointments-only). */
+const canJoinNow = (s: ServiceInfo) => s.bookingMode !== 'APPOINTMENT';
+/** Customers can book a time on this page. */
+const canBook = (s: ServiceInfo) => s.bookingMode === 'APPOINTMENT' || s.bookingMode === 'BOTH';
 
 export default function JoinQueuePage({ params }: { params: Promise<{ code: string }> }) {
   const resolvedParams = use(params);
@@ -91,7 +110,9 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
   
   // Kiosk and multi-ticket are set by staff in the link (?mode=kiosk), not by visitors.
   const [mode] = useState<PageMode>(urlMode === 'kiosk' || urlMode === 'session' ? urlMode : 'normal');
-  const [step, setStep] = useState<'loading' | 'select-service' | 'form' | 'success' | 'error' | 'session-tickets'>('loading');
+  const [step, setStep] = useState<'loading' | 'choose' | 'select-service' | 'form' | 'book' | 'success' | 'error' | 'session-tickets'>('loading');
+  // What the visitor came to do, when the location offers both.
+  const [intent, setIntent] = useState<'join' | 'book'>('join');
   const [location, setLocation] = useState<LocationInfo | null>(null);
   const [selectedServiceId, setSelectedServiceId] = useState<string>('');
   const [joinResult, setJoinResult] = useState<JoinResult | null>(null);
@@ -225,6 +246,16 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
         }
       }
       
+      // Kiosks only issue tickets. Elsewhere, a location that takes bookings
+      // asks first whether to join the line or book a time.
+      const bookable = mode !== 'kiosk' && data.services.some(canBook);
+      if (bookable) {
+        const joinable = data.services.some(canJoinNow);
+        setIntent(joinable ? 'join' : 'book');
+        setStep(joinable ? 'choose' : 'select-service');
+        return;
+      }
+
       // One service, or a first point of contact (Reception): nothing to
       // choose, go straight to the details.
       setStep(start ? 'form' : 'select-service');
@@ -237,7 +268,29 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
 
   const handleSelectService = (serviceId: string) => {
     setSelectedServiceId(serviceId);
-    setStep('form');
+    setStep(intent === 'book' ? 'book' : 'form');
+  };
+
+  const chooseIntent = (next: 'join' | 'book') => {
+    setIntent(next);
+    setError('');
+    if (next === 'book') {
+      const bookable = location?.services.filter(canBook) ?? [];
+      if (bookable.length === 1) {
+        setSelectedServiceId(bookable[0].id);
+        setStep('book');
+      } else {
+        setStep('select-service');
+      }
+      return;
+    }
+    const start = location ? firstStop(location) : null;
+    if (start) {
+      setSelectedServiceId(start);
+      setStep('form');
+    } else {
+      setStep('select-service');
+    }
   };
 
   const NAME_FIELDS = ['name', 'fullName', 'firstName', 'lastName', 'customerName', 'patientName'];
@@ -556,11 +609,60 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
     </div>
   );
 
+  const bothOffered = !!location && !kiosk && location.services.some(canBook) && location.services.some(canJoinNow);
+
+  const renderChoose = () => (
+    <>
+      <div className={styles.intro}>
+        <h1 className={styles.title}>How would you like to be seen?</h1>
+        <p className={styles.lede}>No app or account needed.</p>
+      </div>
+      <ul className={styles.services}>
+        <li>
+          <button type="button" className={styles.service} onClick={() => chooseIntent('join')}>
+            <Footprints size={22} aria-hidden="true" />
+            <span><strong>Join the line now</strong><small>I’m here, or on my way. Get a ticket and follow your place.</small></span>
+            <ChevronRight size={22} aria-hidden="true" />
+          </button>
+        </li>
+        <li>
+          <button type="button" className={styles.service} onClick={() => chooseIntent('book')}>
+            <CalendarClock size={22} aria-hidden="true" />
+            <span><strong>Book a time</strong><small>Choose a day and time, and arrive when it’s your turn.</small></span>
+            <ChevronRight size={22} aria-hidden="true" />
+          </button>
+        </li>
+      </ul>
+    </>
+  );
+
+  const renderBooking = () => {
+    const svc = location?.services.find((s) => s.id === selectedServiceId);
+    if (!svc || !location) return null;
+    return (
+      <BookingFlow
+        service={svc}
+        orgName={location.organization.name}
+        currency={location.organization.currency ?? 'USD'}
+        onBack={location.services.filter(canBook).length > 1 ? () => setStep('select-service') : bothOffered ? () => setStep('choose') : undefined}
+      />
+    );
+  };
+
   const renderServiceSelection = () => (
     <>
       <div className={styles.intro}>
-        <h1 className={styles.title}>What are you here for?</h1>
-        <p className={styles.lede}>Pick one and you’ll get a ticket on this {kiosk ? 'screen' : 'phone'}. No app or account needed.</p>
+        <h1 className={styles.title}>{intent === 'book' ? 'What would you like to book?' : 'What are you here for?'}</h1>
+        <p className={styles.lede}>
+          {intent === 'book'
+            ? 'Pick a service, then choose a day and time.'
+            : <>Pick one and you’ll get a ticket on this {kiosk ? 'screen' : 'phone'}. No app or account needed.</>}
+        </p>
+        {bothOffered && (
+          <button type="button" className={styles.linkish} onClick={() => setStep('choose')}>
+            {intent === 'book' ? 'Join the line now instead' : 'Book a time instead'}
+          </button>
+        )}
       </div>
       {mode === 'session' && sessionEntries.length > 0 && (
         <button type="button" className={styles.linkish} onClick={() => setStep('session-tickets')}>
@@ -571,13 +673,13 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
         <div className={styles.card}><p className={styles.lede}>No services are open here right now. Please ask at the desk.</p></div>
       ) : (
         <ul className={styles.services}>
-          {location?.services.map((s) => (
+          {location?.services.filter((s) => (intent === 'book' ? canBook(s) : canJoinNow(s))).map((s) => (
             <li key={s.id}>
               <button type="button" className={styles.service} onClick={() => handleSelectService(s.id)}>
                 <span>
                   <strong>{s.name}</strong>
                   {s.description && <small>{s.description}</small>}
-                  <em>{waitText(s.id) || `Open ${s.startTime}–${s.endTime}`}</em>
+                  <em>{intent === 'book' ? `About ${s.slotDuration} min` : waitText(s.id) || `Open ${s.startTime}–${s.endTime}`}</em>
                 </span>
                 <ChevronRight size={22} aria-hidden="true" />
               </button>
@@ -723,7 +825,9 @@ export default function JoinQueuePage({ params }: { params: Promise<{ code: stri
         {header}
         {step === 'loading' && renderLoading()}
         {step === 'error' && renderError()}
+        {step === 'choose' && renderChoose()}
         {step === 'select-service' && renderServiceSelection()}
+        {step === 'book' && renderBooking()}
         {step === 'form' && renderForm()}
         {step === 'success' && renderSuccess()}
         {step === 'session-tickets' && renderSessionTickets()}
