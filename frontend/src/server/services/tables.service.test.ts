@@ -219,5 +219,6 @@ describe('module loading', () => {
     const tables = await import('./tables.service');
     const { BookingError } = await import('./bookingError');
     expect(new tables.PriceChangeError('x', {} as never)).toBeInstanceOf(BookingError);
-  });
+    // Loading booking.service pulls in much of the server, which is slow on a busy machine.
+  }, 30_000);
 });

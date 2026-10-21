@@ -19,6 +19,8 @@ const SCENE_W = 1250;
 const OX = 500;
 const VB_W = 1780;
 const VB_H = 740;
+/** The part of the room shown below 1280px: door to the last desk, TV hangers to floor. Keep in step with .sceneWrap's aspect-ratio. */
+const COMPACT = { x: 500, y: 40, w: 1300, h: 700 };
 const FLOOR_Y = 620;
 const DOOR_X = 64;
 const KIOSK_X = 196;
@@ -54,18 +56,19 @@ type Mode = 'sit' | 'loiter';
 type Kind = 'man' | 'woman' | 'elderMan' | 'elderWoman';
 
 // A mix of ages and sexes; `kid` means a child is with them (no ticket of
-// their own). Indexed by person id so the cast repeats in a steady rhythm.
-const PROFILES: { kind: Kind; kid: boolean }[] = [
-  { kind: 'woman', kid: true },
-  { kind: 'man', kid: false },
-  { kind: 'elderWoman', kid: false },
-  { kind: 'woman', kid: false },
-  { kind: 'man', kid: false },
-  { kind: 'elderMan', kid: false },
-  { kind: 'woman', kid: false },
-  { kind: 'man', kid: true },
-  { kind: 'elderWoman', kid: false },
-  { kind: 'man', kid: false },
+// their own) and `family` means a partner and two children are too. Indexed by person id so the cast repeats in a steady rhythm.
+const PROFILES: { kind: Kind; kid: boolean; family: boolean }[] = [
+  { kind: 'woman', kid: true, family: false },
+  { kind: 'man', kid: false, family: false },
+  { kind: 'elderWoman', kid: false, family: false },
+  // A family of four on one ticket: two parents and two children.
+  { kind: 'woman', kid: false, family: true },
+  { kind: 'man', kid: false, family: false },
+  { kind: 'elderMan', kid: false, family: false },
+  { kind: 'woman', kid: false, family: false },
+  { kind: 'man', kid: true, family: false },
+  { kind: 'elderWoman', kid: false, family: false },
+  { kind: 'man', kid: false, family: true },
 ];
 
 interface Person {
@@ -93,6 +96,9 @@ interface Person {
   noShow: boolean; // joined by phone and never turns up
   seated: boolean; // reached the chair and sat down
   front: boolean; // drawn in front of the walkers (near seating cluster)
+  family: boolean; // a partner and two children come with them
+  arrived: boolean; // at the kiosk (not still walking to it): only then do they hold up their phone
+  partnerSeat: number | null; // the chair beside theirs, for a family
 }
 
 interface Callout {
@@ -142,6 +148,9 @@ function makePerson(id: number, num: number, phase: Phase): Person {
     noShow: phase === 'queued',
     seated: false,
     front: false,
+    family: profile.family,
+    arrived: false,
+    partnerSeat: null,
   };
 }
 
@@ -161,6 +170,7 @@ function initialState(): State {
     p.spot = spot;
     p.seated = mode === 'sit';
     p.front = mode === 'sit' && !SEATS[spot].far;
+    if (p.family && mode === 'sit') p.partnerSeat = spot + 1;
     people.push(p);
   }
   return {
@@ -217,26 +227,31 @@ function go(prev: Person, next: Person): Person {
   const b = posFor(next);
   const dist = Math.hypot(a.x - b.x, a.y - b.y);
   const seconds = walkSeconds(dist) + delayFor(next.phase);
-  return { ...next, seated: false, dist, walkLeft: dist > 0 ? Math.ceil(seconds / (TICK_MS / 1000)) : 0 };
+  return { ...next, seated: false, arrived: false, dist, walkLeft: dist > 0 ? Math.ceil(seconds / (TICK_MS / 1000)) : 0 };
 }
 
 /** Where someone settles after the kiosk: most sit, some prefer to stand and chat. */
-function pickSpot(people: Person[], p: Person): { mode: Mode; spot: number } {
+function pickSpot(people: Person[], p: Person): { mode: Mode; spot: number; partnerSeat: number | null } {
   const waiting = people.filter((q) => q.phase === 'waiting');
-  const takenSeats = new Set(waiting.filter((q) => q.mode === 'sit').map((q) => q.spot));
+  const takenSeats = new Set(waiting.filter((q) => q.mode === 'sit').flatMap((q) => (q.partnerSeat == null ? [q.spot] : [q.spot, q.partnerSeat])));
   const takenLoiter = new Set(waiting.filter((q) => q.mode === 'loiter').map((q) => q.spot));
   const freeSeats = SEATS.map((_, i) => i).filter((i) => !takenSeats.has(i));
   const freeLoiter = LOITER.map((_, i) => i).filter((i) => !takenLoiter.has(i));
-  const prefersToStand = !p.kid && !isElder(p.kind) && p.id % 3 === 1;
+  const prefersToStand = !p.kid && !p.family && !isElder(p.kind) && p.id % 3 === 1;
 
+  if (p.family) {
+    // Two chairs side by side in one cluster; failing that, one chair and the partner standing beside it.
+    const pair = freeSeats.find((i) => i % 4 !== 3 && !takenSeats.has(i + 1));
+    if (pair !== undefined) return { mode: 'sit', spot: pair, partnerSeat: pair + 1 };
+  }
   if (prefersToStand && freeLoiter.length > 0) {
     // Join someone already standing, so they have company.
     const withCompany = freeLoiter.find((i) => takenLoiter.has(i ^ 1));
-    return { mode: 'loiter', spot: withCompany ?? freeLoiter[0] };
+    return { mode: 'loiter', spot: withCompany ?? freeLoiter[0], partnerSeat: null };
   }
-  if (freeSeats.length > 0) return { mode: 'sit', spot: freeSeats[(p.id * 5) % freeSeats.length] };
-  if (freeLoiter.length > 0) return { mode: 'loiter', spot: freeLoiter[0] };
-  return { mode: 'sit', spot: 0 };
+  if (freeSeats.length > 0) return { mode: 'sit', spot: freeSeats[(p.id * 5) % freeSeats.length], partnerSeat: null };
+  if (freeLoiter.length > 0) return { mode: 'loiter', spot: freeLoiter[0], partnerSeat: null };
+  return { mode: 'sit', spot: 0, partnerSeat: null };
 }
 
 /** Everyone waiting for a desk, in the order they'll be called: booked first, then by ticket. */
@@ -279,8 +294,8 @@ function tick(state: State): State {
   const settled = people;
   people = people.map((p) => {
     if (p.phase === 'kiosk') {
-      const { mode, spot } = pickSpot(settled, p);
-      return go(p, { ...p, phase: 'waiting', mode, spot, hasTicket: true });
+      const { mode, spot, partnerSeat } = pickSpot(settled, p);
+      return go(p, { ...p, phase: 'waiting', mode, spot, partnerSeat, hasTicket: true });
     }
     if (p.phase === 'door') return go(p, { ...p, phase: 'kiosk' });
     return p;
@@ -304,19 +319,25 @@ type Action = { type: 'tick' } | { type: 'settle'; id: number };
 
 function reduce(state: State, action: Action): State {
   if (action.type === 'tick') return tick(state);
-  // Someone reached their chair: sit down, and (near cluster) step in front of the walkers.
+  // Someone reached their chair (sit down and, in the near cluster, step in front of the walkers) or the kiosk (hold up their phone).
   return {
     ...state,
     people: state.people.map((p) =>
-      p.id === action.id && p.phase === 'waiting' && p.mode === 'sit' ? { ...p, seated: true, front: !SEATS[p.spot].far } : p
+      p.id !== action.id
+        ? p
+        : p.phase === 'kiosk'
+          ? { ...p, arrived: true }
+          : p.phase === 'waiting' && p.mode === 'sit'
+            ? { ...p, seated: true, front: !SEATS[p.spot].far }
+            : p
     ),
   };
 }
 
 /** A child walking beside an adult. Drawn at 70% scale. */
-function Kid({ outfit, skin, hair, x }: { outfit: string; skin: string; hair: string; x: number }) {
+function Kid({ outfit, skin, hair, x, scale = 0.7 }: { outfit: string; skin: string; hair: string; x: number; scale?: number }) {
   return (
-    <g transform={`translate(${x}, 0) scale(0.7)`}>
+    <g transform={`translate(${x}, 0) scale(${scale})`}>
       <ellipse cx="0" cy="0" rx="15" ry="4" fill="rgba(28,39,51,0.12)" />
       <rect x="-8" y="-28" width="6.5" height="28" rx="3" fill="#4a4f63" />
       <rect x="1.5" y="-28" width="6.5" height="28" rx="3" fill="#4a4f63" />
@@ -510,6 +531,47 @@ function NextUpCard({ y }: { y: number }) {
   );
 }
 
+// Where the children play while their parents wait: the mat in the foreground, left of the entrance.
+const PLAY: Pos[] = [
+  { x: 112, y: FLOOR_Y + 70, s: 0.8 },
+  { x: 190, y: FLOOR_Y + 88, s: 0.84 },
+];
+
+/** A family's second parent. Looks like a different person from the lead, and the opposite sex. */
+function partnerOf(p: Person): Person {
+  return {
+    ...p,
+    kind: isFemale(p.kind) ? 'man' : 'woman',
+    outfit: OUTFITS[(p.id + 3) % OUTFITS.length],
+    pants: PANTS[(p.id + 1) % PANTS.length],
+    hair: HAIR[(p.id * 3) % HAIR.length],
+    kid: false,
+    family: false,
+    hasTicket: true,
+  };
+}
+
+/** Where a family's partner and two children are: with the lead on the move, and at the play mat while waiting. */
+function companionSpots(p: Person): { partner: Pos; kids: Pos[] } {
+  const lead = posFor(p);
+  if (p.phase === 'waiting') {
+    const partner =
+      p.mode === 'sit' && p.partnerSeat != null
+        ? { x: SEATS[p.partnerSeat].x, y: SEATS[p.partnerSeat].y, s: SEATS[p.partnerSeat].s }
+        : { x: lead.x + 40 * lead.s, y: lead.y, s: lead.s };
+    return { partner, kids: PLAY };
+  }
+  // At the desk the counter is on the right, so the family stands to the left of the lead.
+  const side = p.phase === 'called' ? -1 : 1;
+  return {
+    partner: { x: lead.x + 34 * side, y: lead.y, s: 1 },
+    kids: [
+      { x: lead.x - 30 * side, y: lead.y + 6, s: 0.7 },
+      { x: lead.x + 10 * side, y: lead.y + 10, s: 0.65 },
+    ],
+  };
+}
+
 function Figure({ person, chatBubble, talking, nextUp, gaze }: { person: Person; chatBubble: boolean; talking: boolean; nextUp: boolean; gaze: { dx: number; dy: number } }) {
   // Phone joiners who never arrive have no figure.
   if (person.phase === 'queued' || person.noShow) return null;
@@ -519,22 +581,27 @@ function Figure({ person, chatBubble, talking, nextUp, gaze }: { person: Person;
   const sitting = person.phase === 'waiting' && person.mode === 'sit' && person.seated;
   const pos = posFor(person);
   const chipY = -114;
+  const family = person.family ? companionSpots(person) : null;
+  const moving = person.walkLeft > 0;
+  const settled = person.phase === 'waiting' && !moving;
+  const placed = (at: Pos): React.CSSProperties => ({
+    transform: `translate(${at.x}px, ${at.y}px) scale(${at.s})`,
+    transitionDuration: `${duration}s`,
+    transitionDelay: `${delayFor(person.phase)}s`,
+    opacity: person.phase === 'leaving' ? 0 : 1,
+  });
   return (
+    <>
     <g
       className={styles.figure}
-      style={{
-        transform: `translate(${pos.x}px, ${pos.y}px) scale(${pos.s})`,
-        transitionDuration: `${duration}s`,
-        transitionDelay: `${delayFor(person.phase)}s`,
-        opacity: person.phase === 'leaving' ? 0 : 1,
-      }}
+      style={placed(pos)}
     >
       <g className={person.walkLeft > 0 ? styles.walking : undefined}>
         {/* shadow */}
         <ellipse cx="0" cy="0" rx="17" ry="4" fill="rgba(28,39,51,0.12)" />
         {/* a child sits on a seated adult's lap; otherwise they walk and stand beside them */}
         {person.kid && !sitting && <Kid x={-24} outfit={person.kidOutfit} skin={person.kidSkin} hair={person.kidHair} />}
-        <Body person={person} sitting={sitting} called={called} talking={talking} buzzing={nextUp} gaze={gaze} scanning={person.phase === 'kiosk'} />
+        <Body person={person} sitting={sitting} called={called} talking={talking} buzzing={nextUp} gaze={gaze} scanning={person.phase === 'kiosk' && person.arrived} />
       </g>
       {nextUp ? <NextUpCard y={chipY - 30} /> : chatBubble && <ChatBubble />}
       {person.hasTicket && person.phase !== 'leaving' && !chatBubble && !nextUp && (
@@ -546,6 +613,24 @@ function Figure({ person, chatBubble, talking, nextUp, gaze }: { person: Person;
         </g>
       )}
     </g>
+    {family && (
+      <>
+        <g className={styles.figure} style={placed(family.partner)}>
+          <g className={moving ? styles.walking : undefined}>
+            <ellipse cx="0" cy="0" rx="17" ry="4" fill="rgba(28,39,51,0.12)" />
+            <Body person={partnerOf(person)} sitting={sitting && person.partnerSeat != null} called={false} talking={false} buzzing={false} gaze={{ dx: 0, dy: 0 }} scanning={false} />
+          </g>
+        </g>
+        {family.kids.map((at, i) => (
+          <g key={i} className={styles.figure} style={placed(at)}>
+            <g className={moving ? styles.walking : settled ? styles.playing : undefined} style={settled ? { animationDelay: `${i * 0.45}s` } : undefined}>
+              <Kid x={0} scale={1} outfit={i ? KID_OUTFITS[(person.id + 2) % KID_OUTFITS.length] : person.kidOutfit} skin={i ? person.kidSkin : person.kidSkin} hair={i ? HAIR[(person.id * 13) % HAIR.length] : person.kidHair} />
+            </g>
+          </g>
+        ))}
+      </>
+    )}
+    </>
   );
 }
 
@@ -757,7 +842,7 @@ export default function LobbyScene() {
   const sitTimers = useRef(new Map<string, number>());
   const [reduced, setReduced] = useState(false);
   const [visible, setVisible] = useState(true);
-  const [layout, setLayout] = useState<'wide' | 'compact' | 'narrow'>('wide');
+  const [layout, setLayout] = useState<'wide' | 'compact'>('wide');
   const ref = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
@@ -768,19 +853,15 @@ export default function LobbyScene() {
     return () => mq.removeEventListener?.('change', onChange);
   }, []);
 
-  // Wide screens show the whole room behind the hero text; smaller ones crop
-  // in on the part that carries the story (seats, cooler, desks, screen).
+  // Wide screens show the whole room behind the hero text; smaller ones trim the
+  // empty wall either side but keep everything that carries the story (entrance,
+  // kiosk, seats, cooler, all three desks and the wall screen), so nothing is cut off.
   useEffect(() => {
     const wide = window.matchMedia('(min-width: 1280px)');
-    const narrow = window.matchMedia('(max-width: 700px)');
-    const update = () => setLayout(wide.matches ? 'wide' : narrow.matches ? 'narrow' : 'compact');
+    const update = () => setLayout(wide.matches ? 'wide' : 'compact');
     update();
     wide.addEventListener?.('change', update);
-    narrow.addEventListener?.('change', update);
-    return () => {
-      wide.removeEventListener?.('change', update);
-      narrow.removeEventListener?.('change', update);
-    };
+    return () => wide.removeEventListener?.('change', update);
   }, []);
 
   useEffect(() => {
@@ -801,11 +882,14 @@ export default function LobbyScene() {
 
   const { board, callout, people, t, deskBusy } = state;
 
-  // Someone heading for a chair sits down when they get there, not before.
+  // Someone heading for a chair sits down when they get there, and someone heading for the
+  // kiosk holds up their phone when they get there, not before.
   useEffect(() => {
     for (const p of state.people) {
-      if (p.phase !== 'waiting' || p.mode !== 'sit' || p.seated) continue;
-      const key = `${p.id}-${p.spot}`;
+      const toKiosk = p.phase === 'kiosk' && !p.arrived;
+      const toChair = p.phase === 'waiting' && p.mode === 'sit' && !p.seated;
+      if (!toKiosk && !toChair) continue;
+      const key = toKiosk ? `${p.id}-kiosk` : `${p.id}-${p.spot}`;
       if (sitTimers.current.has(key)) continue;
       sitTimers.current.set(key, window.setTimeout(() => dispatch({ type: 'settle', id: p.id }), walkSeconds(p.dist) * 1000 + 150));
     }
@@ -830,7 +914,7 @@ export default function LobbyScene() {
   const kioskBusy = people.some((p) => p.phase === 'kiosk');
   // Window light warms and cools over a slow day cycle.
   const warm = (1 - Math.cos((2 * Math.PI * t) / 90)) / 2;
-  const viewBox = layout === 'wide' ? `0 0 ${VB_W} ${VB_H}` : layout === 'compact' ? `520 40 1000 ${VB_H - 40}` : `700 200 700 ${VB_H - 200}`;
+  const viewBox = layout === 'wide' ? `0 0 ${VB_W} ${VB_H}` : `${COMPACT.x} ${COMPACT.y} ${COMPACT.w} ${COMPACT.h}`;
 
   // People standing in the first two loiter spots are a chatting pair; they
   // take turns to "speak".
@@ -886,6 +970,28 @@ export default function LobbyScene() {
           fill="#d3ddd7"
         />
       ))}
+
+      {/* the children's play mat, foreground left of the entrance */}
+      <g aria-hidden="true">
+        <rect x="52" y={FLOOR_Y + 40} width="196" height="78" rx="14" fill="#fff6e0" stroke="#e7d3a1" strokeWidth="1.5" strokeDasharray="5 4" />
+        {Array.from({ length: 10 }, (_, k) => (
+          <rect
+            key={k}
+            x={62 + (k % 5) * 35}
+            y={FLOOR_Y + 48 + Math.floor(k / 5) * 32}
+            width="33"
+            height="30"
+            rx="5"
+            fill={KID_OUTFITS[(k + Math.floor(k / 5)) % KID_OUTFITS.length]}
+            opacity="0.55"
+          />
+        ))}
+        {/* blocks and a ball */}
+        <rect x="72" y={FLOOR_Y + 84} width="14" height="14" rx="2" fill="#e0b84f" stroke="#a98622" strokeWidth="1" />
+        <rect x="88" y={FLOOR_Y + 88} width="14" height="14" rx="2" fill="#d98ca3" stroke="#a15a70" strokeWidth="1" />
+        <rect x="78" y={FLOOR_Y + 70} width="14" height="14" rx="2" fill="#8aa7e0" stroke="#5a78b0" strokeWidth="1" />
+        <circle cx="228" cy={FLOOR_Y + 98} r="8" fill="#d95f4b" stroke="#a03a2a" strokeWidth="1" />
+      </g>
 
       {/* entrance */}
       <g transform={`translate(${DOOR_X - 38}, ${FLOOR_Y - 150})`}>

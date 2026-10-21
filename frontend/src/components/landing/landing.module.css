@@ -103,6 +103,10 @@
   height: clamp(300px, 52vw, 440px);
 }
 /* On wide screens the room fills the whole hero and the text sits on its empty left wall. */
+/* Below that the whole story (door to last desk) is shown, sized to fit the width. */
+@media (max-width: 1279px) {
+  .sceneWrap { height: auto; aspect-ratio: 1300 / 700; max-height: 440px; }
+}
 @media (min-width: 1280px) {
   .sceneWrap { position: absolute; inset: 0; height: auto; margin: 0; z-index: 1; }
 }
@@ -192,8 +196,16 @@
   50% { opacity: 1; }
 }
 
+/* children at the play mat hop about while their parents wait */
+.playing { animation: hop 0.9s ease-in-out infinite; }
+@keyframes hop {
+  0%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-9px); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .figure { transition: none; }
+  .playing,
   .walking, .ticket, .ticketCalled, .boardTicket, .talking, .chatDot, .wave, .wave2, .buzz, .notify, .adIn, .tvTick, .sitDown, .scanBeam { animation: none; }
   .bgWalker { display: none; }
   .hand { transition: none; }
@@ -384,5 +396,5 @@
   .navHideSm { display: none; }
   .journey { grid-template-columns: 1fr; }
   .hero { min-height: auto; }
-  .sceneWrap { height: 320px; margin-top: 2rem; }
+  .sceneWrap { margin-top: 2rem; }
 }
