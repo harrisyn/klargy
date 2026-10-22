@@ -352,6 +352,26 @@
 .tvPoints li { color: #c9d3dc; line-height: 1.55; }
 .tvPoints strong { display: block; color: white; font-family: var(--font-display); font-size: 1.125rem; margin-bottom: 0.25rem; }
 
+/* kinds of place, linking to /use-cases */
+.places { list-style: none; padding: 0; margin: 2.5rem 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; }
+.place {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 1rem 1.125rem;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--gray-200);
+  color: var(--ink);
+  font-weight: 600;
+  transition: border-color 150ms;
+}
+.place:hover { border-color: var(--primary-400); color: var(--ink); }
+.place svg { color: var(--primary-500); flex-shrink: 0; }
+.placesMore { margin: 1.5rem 0 0; color: var(--gray-600); }
+.placesMore a { color: var(--primary-700); font-weight: 600; text-decoration: underline; }
+
 /* closing CTA */
 .closing { text-align: left; }
 .closingInner {
@@ -380,7 +400,7 @@
   color: var(--gray-500);
   font-size: 0.875rem;
 }
-.footerLinks { display: flex; gap: 1.25rem; }
+.footerLinks { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }
 .footerLinks a { color: var(--gray-600); }
 
 @media (max-width: 900px) {
