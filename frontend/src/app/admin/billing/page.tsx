@@ -8,6 +8,7 @@ import Layout from '@/components/Layout';
 import { Button, Card, Badge, PageHeader, Icon, UsageBar, Input, Select } from '@/components/ui';
 import { confirmDialog } from '@/lib/dialog';
 import { TenantWalletCard } from '@/components/billing/TenantWalletCard';
+import { FEATURE_LABELS } from '@/lib/planFeatures';
 
 interface Plan {
   id: string;
@@ -96,26 +97,6 @@ const ADDON_NOTES: Partial<Record<AddOnKind, string>> = {
 type BillingCycle = 'monthly' | 'quarterly' | 'yearly';
 
 const CYCLE_MONTHS: Record<BillingCycle, number> = { monthly: 1, quarterly: 3, yearly: 12 };
-
-// Only keys the server enforces are listed; anything else is not shown.
-const FEATURE_LABELS: Record<string, string> = {
-  analytics: 'Analytics',
-  ai: 'AI-assisted analytics',
-  multiLocation: 'More than one location',
-  servicePoints: 'Desks and rooms',
-  serviceFlows: 'Journeys between services',
-  smsNotifications: 'Text message alerts',
-  whatsappNotifications: 'WhatsApp messages',
-  ownPaymentKeys: 'Your own payment account for bookings',
-  customBranding: 'Own logo and colour',
-  customDomain: 'Custom domain',
-  apiAccess: 'API and integrations',
-  emrIntegration: 'Connected systems (CRM, POS, EMR)',
-  displayMedia: 'Adverts on lobby screens',
-  // legacy keys from the old plan editor
-  multipleLocations: 'More than one location',
-  whiteLabel: 'Own logo and colour',
-};
 
 function priceForCycle(plan: Plan, cycle: BillingCycle): number {
   if (cycle === 'quarterly') return Number(plan.priceQuarterly);

@@ -2,11 +2,12 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Check } from 'lucide-react';
+import { ArrowRight, Check } from 'lucide-react';
 import LobbyScene from './LobbyScene';
 import styles from './landing.module.css';
 import { BrandLogo } from '@/components/brand/BrandLogo';
 import { APP_NAME } from '@/lib/appConfig';
+import { USE_CASES } from '@/lib/marketing/useCases';
 
 const STEPS = [
   { title: 'Scan and join', text: 'A QR code at the entrance or a kiosk at reception issues a ticket in seconds. No app to install.' },
@@ -43,6 +44,8 @@ export default function LandingPage() {
         <nav className={styles.navLinks} aria-label="Site">
           <a href="#how-it-works" className={`${styles.navLink} ${styles.navHideSm}`}>How it works</a>
           <a href="#screens" className={`${styles.navLink} ${styles.navHideSm}`}>Screens</a>
+          <Link href="/use-cases" className={`${styles.navLink} ${styles.navHideSm}`}>Use cases</Link>
+          <Link href="/pricing" className={styles.navLink}>Pricing</Link>
           <Link href="/login" className={styles.navLink}>Sign in</Link>
           <Link href="/register" className={`${styles.btnPrimary} ${styles.btnSmall}`}>Start free</Link>
         </nav>
@@ -197,6 +200,27 @@ export default function LandingPage() {
           </div>
         </section>
 
+        <section className={styles.section} aria-labelledby="places-title">
+          <h2 id="places-title" className={styles.sectionTitle}>Made for the place you run.</h2>
+          <p className={styles.sectionLede}>
+            Each kind of place starts with its own ready-made setup: the steps of a visit, the desks or rooms, and the
+            right word for the people you serve.
+          </p>
+          <ul className={styles.places}>
+            {USE_CASES.map((u) => (
+              <li key={u.slug}>
+                <Link href={`/use-cases/${u.slug}`} className={styles.place}>
+                  <span>{u.name}</span>
+                  <ArrowRight size={16} aria-hidden="true" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <p className={styles.placesMore}>
+            <Link href="/pricing">See pricing</Link>, from a free plan to a fee we agree with you.
+          </p>
+        </section>
+
         <section className={`${styles.section} ${styles.closing}`}>
           <div className={styles.closingInner}>
             <div>
@@ -211,6 +235,8 @@ export default function LandingPage() {
       <footer className={styles.footer}>
         <span>© {new Date().getFullYear()} {APP_NAME}</span>
         <div className={styles.footerLinks}>
+          <Link href="/use-cases">Use cases</Link>
+          <Link href="/pricing">Pricing</Link>
           <Link href="/locations">Find a location</Link>
           <Link href="/privacy">Privacy</Link>
           <Link href="/terms">Terms</Link>

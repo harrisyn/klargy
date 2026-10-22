@@ -46,3 +46,24 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Tell Dokploy to redeploy. Only main moves the `latest` tag the compose
+      # stack pulls, so tag builds and manual runs on other branches skip this.
+      # Dokploy expects GitHub's registry_package webhook shape.
+      - name: Trigger Dokploy deploy
+        if: github.ref == 'refs/heads/main'
+        env:
+          DOKPLOY_WEBHOOK_URL: ${{ secrets.DOKPLOY_WEBHOOK_URL }}
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+        run: |
+          if [ -z "$DOKPLOY_WEBHOOK_URL" ]; then
+            echo "::error::DOKPLOY_WEBHOOK_URL secret is not set"
+            exit 1
+          fi
+          payload=$(jq -n --arg url "$IMAGE" '{registry_package: {package_version: {package_url: $url}}}')
+          curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-all-errors --max-time 60 \
+            -X POST "$DOKPLOY_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "x-github-event: registry_package" \
+            -d "$payload"

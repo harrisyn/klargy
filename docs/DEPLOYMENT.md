@@ -57,7 +57,7 @@ Required in production:
 | `SMTP_HOST` (+ `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`) | Outgoing email: OTP codes, invites, notifications |
 | `REALTIME_*` | Live queue updates (Pusher/Ably/Soketi). Empty falls back to polling on Vercel; `docker-compose.prod.yml` requires them |
 
-Optional: `APP_NAME` (branding, default `Klargy`), `LEGAL_CONTACT_EMAIL`,
+Optional: `APP_NAME` (branding, default `Klargy`), `LEGAL_CONTACT_EMAIL`, `SALES_CONTACT_EMAIL` ("Talk to us" on /pricing),
 Twilio SMS, AI keys, Vercel custom-domain automation. See the template.
 
 ## First-run setup and the superadmin account
