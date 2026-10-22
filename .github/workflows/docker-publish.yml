@@ -9,6 +9,10 @@ on:
 env:
   IMAGE_NAME: klargy-queue
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 jobs:
   build-push:
     runs-on: ubuntu-latest
