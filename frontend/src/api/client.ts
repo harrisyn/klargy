@@ -1478,69 +1478,6 @@ class ApiClient {
     return data;
   }
 
-  // Booking payments (organization admin)
-  async getPaymentsOverview(): Promise<PaymentsOverview> {
-    const { data } = await this.client.get('/payments');
-    return data;
-  }
-
-  async updatePaymentSettings(body: { currency?: string; payoutDetails?: string }) {
-    const { data } = await this.client.put('/payments/settings', body);
-    return data;
-  }
-
-  async saveOwnPaymentProvider(provider: 'stripe' | 'paystack', body: { publicKey?: string; secretKey?: string; webhookSecret?: string; isActive?: boolean }) {
-    const { data } = await this.client.put(`/payments/providers/${provider}`, body);
-    return data;
-  }
-
-  async removeOwnPaymentProvider(provider: 'stripe' | 'paystack') {
-    const { data } = await this.client.delete(`/payments/providers/${provider}`);
-    return data;
-  }
-
-  async requestPayout(amount?: number) {
-    const { data } = await this.client.post('/payments/payouts', { amount });
-    return data as { id: string; amount: number; currency: string; status: string };
-  }
-
-  // Payouts (superadmin)
-  async getPayoutSettings(): Promise<{ holdDays: number; feePercent: number; minPayout: number }> {
-    const { data } = await this.client.get('/superadmin/payout-settings');
-    return data;
-  }
-
-  async updatePayoutSettings(body: { holdDays: number; feePercent: number; minPayout: number }) {
-    const { data } = await this.client.put('/superadmin/payout-settings', body);
-    return data as { holdDays: number; feePercent: number; minPayout: number };
-  }
-
-  async listPayoutRequests(status?: string): Promise<PayoutRequestRow[]> {
-    const { data } = await this.client.get('/superadmin/payouts', { params: status ? { status } : {} });
-    return data;
-  }
-
-  async decidePayout(id: string, action: 'PAID' | 'REJECTED', note?: string) {
-    const { data } = await this.client.post(`/superadmin/payouts/${id}/decision`, { action, note });
-    return data;
-  }
-
-  // One-off sessions (events, classes, tickets)
-  async getServiceSessions(serviceId: string): Promise<ServiceSession[]> {
-    const { data } = await this.client.get(`/services/${serviceId}/sessions`);
-    return data;
-  }
-
-  async createServiceSession(serviceId: string, body: { date: string; startTime: string; durationMinutes?: number; capacity: number; price?: number | null; label?: string }): Promise<ServiceSession> {
-    const { data } = await this.client.post(`/services/${serviceId}/sessions`, body);
-    return data;
-  }
-
-  async deleteServiceSession(serviceId: string, slotId: string) {
-    const { data } = await this.client.delete(`/services/${serviceId}/sessions/${slotId}`);
-    return data;
-  }
-
   async getFlowTemplates(): Promise<FlowTemplateInfo[]> {
     const { data } = await this.client.get('/service-flows/templates');
     return data;
